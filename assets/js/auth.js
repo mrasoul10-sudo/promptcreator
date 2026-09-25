@@ -1,9 +1,14 @@
-// Local accounts: stored in IndexedDB, passwords hashed with PBKDF2 (WebCrypto).
-// This protects profiles from casual access on a shared browser; it is not a server-side account.
+// Accounts live on the server (worker/src/store.js); this module keeps a cached copy of the signed-in user in
+// IndexedDB so the app opens instantly and keeps working offline. Passwords never leave the browser: they are
+// stretched here with PBKDF2 (per-account random salt) and only the result is sent.
+// Accounts from before the server (local-only, PBKDF2 hash in IndexedDB) move to the server on their next sign-in,
+// together with their prompts.
 
-import * as db from './db.js?v=202609251322';
+import * as db from './db.js?v=202609251412';
+import * as api from './api.js?v=202609251412';
 
-const SESSION_KEY = 'pc.session';
+const SESSION_KEY = 'pc.session'; // id of the signed-in user (cached profile in IndexedDB)
+const VIA_KEY = 'pc.via'; // 'password' | 'google': how this session was opened
 const PBKDF2_ITERATIONS = 210000;
 const AVATAR_SIZE = 256;
 
@@ -17,26 +22,18 @@ export const DEFAULT_SETTINGS = Object.freeze({
   defaultDetail: 'balanced',
 });
 
-const AVATAR_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f97316', '#10b981', '#0ea5e9', '#14b8a6', '#f43f5e'];
-
 let current = null;
-// True when the current session was opened with Google; lets a user who forgot their password set a new one.
-let viaGoogle = false;
-
-const RECOVERY_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+let pendingRecovery = null; // the code the server issued at registration, shown once
 
 function toHex(buffer) {
   return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** PBKDF2-SHA256 of the password; used for the server key and to check pre-server local accounts. */
 async function hashPassword(password, saltHex) {
   const salt = Uint8Array.from(saltHex.match(/.{2}/g).map((h) => parseInt(h, 16)));
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: PBKDF2_ITERATIONS },
-    key,
-    256,
-  );
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: PBKDF2_ITERATIONS }, key, 256);
   return toHex(bits);
 }
 
@@ -54,20 +51,25 @@ function validate({ name, email, password }, { requirePassword = true } = {}) {
   if (requirePassword && String(password || '').length < 6) throw new Error('رمز عبور باید حداقل ۶ کاراکتر باشد.');
 }
 
-function persistSession(userId, remember) {
+function readStored(key) {
   try {
-    localStorage.removeItem(SESSION_KEY);
-    sessionStorage.removeItem(SESSION_KEY);
-    (remember ? localStorage : sessionStorage).setItem(SESSION_KEY, userId);
-  } catch { /* storage blocked: session lasts for this page load only */ }
-}
-
-function readSession() {
-  try {
-    return localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY);
+    return localStorage.getItem(key) || sessionStorage.getItem(key);
   } catch {
     return null;
   }
+}
+
+function persist(userId, via, remember) {
+  try {
+    for (const k of [SESSION_KEY, VIA_KEY]) { localStorage.removeItem(k); sessionStorage.removeItem(k); }
+    const store = remember ? localStorage : sessionStorage;
+    store.setItem(SESSION_KEY, userId);
+    store.setItem(VIA_KEY, via);
+  } catch { /* storage blocked: signed in for this page load only */ }
+}
+
+function announce() {
+  window.dispatchEvent(new CustomEvent('pc:auth', { detail: { user: current } }));
 }
 
 export function currentUser() {
@@ -78,188 +80,229 @@ export function settings() {
   return { ...DEFAULT_SETTINGS, ...(current?.settings || {}) };
 }
 
+/**
+ * Opens the cached session instantly, then checks it with the server in the background (profile changes from
+ * other devices, blocked or expired sessions). Local sessions from before the server have no token: signed out.
+ */
 export async function restore() {
-  const id = readSession();
-  current = id ? (await db.get('users', id)) || null : null;
+  const id = readStored(SESSION_KEY);
+  if (!id || !api.token()) { current = null; return null; }
+  current = (await db.get('users', id)) || null;
+  const check = refresh();
+  if (!current) await check;
   return current;
 }
 
-export async function register({ name, email, password, remember = true }) {
-  validate({ name, email, password });
-  const normalized = normalizeEmail(email);
-  if (await db.getByIndex('users', 'email', normalized)) throw new Error('این ایمیل قبلاً در این مرورگر ثبت شده است.');
-  const salt = randomSalt();
-  const user = {
-    id: db.uid(),
-    name: String(name).trim(),
-    email: normalized,
-    salt,
-    passHash: await hashPassword(password, salt),
-    avatar: null,
-    color: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
-    settings: { ...DEFAULT_SETTINGS },
-    createdAt: Date.now(),
-  };
-  await db.put('users', user);
-  current = user;
-  persistSession(user.id, remember);
-  return user;
-}
-
-function normalizeCode(code) {
-  return String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-}
-
-/** Creates (or replaces) the account's one-time recovery code and returns it for display. Only its hash is stored. */
-export async function createRecoveryCode() {
-  const bytes = crypto.getRandomValues(new Uint8Array(12));
-  const raw = [...bytes].map((b) => RECOVERY_ALPHABET[b % RECOVERY_ALPHABET.length]).join('');
-  const salt = randomSalt();
-  await save({ recoverySalt: salt, recoveryHash: await hashPassword(raw, salt) });
-  return raw.match(/.{4}/g).join('-');
-}
-
-export function hasRecoveryCode() {
-  return Boolean(current?.recoveryHash);
-}
-
-/** Resets a forgotten password with the recovery code; signs the user in and returns a fresh recovery code. */
-export async function resetPassword({ email, code, password, remember = true }) {
-  const user = await db.getByIndex('users', 'email', normalizeEmail(email));
-  const valid = user?.recoveryHash && (await hashPassword(normalizeCode(code), user.recoverySalt)) === user.recoveryHash;
-  if (!valid) throw new Error('ایمیل یا کد بازیابی اشتباه است.');
-  validate({ password });
-  const salt = randomSalt();
-  current = { ...user, salt, passHash: await hashPassword(password, salt), updatedAt: Date.now() };
-  await db.put('users', current);
-  persistSession(current.id, remember);
-  return createRecoveryCode();
-}
-
-/** Whether a local account exists for this email (drives the email-first sign-in step). */
-export async function lookupAccount(email) {
-  const user = await db.getByIndex('users', 'email', normalizeEmail(email));
-  return { exists: Boolean(user), hasPassword: Boolean(user?.passHash) };
-}
-
-export async function login({ email, password, remember = true }) {
-  const user = await db.getByIndex('users', 'email', normalizeEmail(email));
-  if (user && !user.passHash) throw new Error('این حساب با گوگل ساخته شده است؛ با دکمه «ادامه با گوگل» وارد شوید.');
-  if (!user || (await hashPassword(String(password || ''), user.salt)) !== user.passHash) {
-    throw new Error('ایمیل یا رمز عبور اشتباه است.');
+/** Re-reads the profile from the server. Signs out on an invalid session; keeps the cache when offline. */
+export async function refresh() {
+  try {
+    const { user } = await api.request('GET', '/me');
+    await cacheUser(user);
+    announce();
+  } catch (err) {
+    if (err.status === 401 || err.status === 403) {
+      signOutLocally();
+      announce();
+      window.dispatchEvent(new CustomEvent('pc:session-ended', { detail: { message: err.message } }));
+    }
   }
-  current = user;
-  persistSession(user.id, remember);
-  return user;
+  return current;
+}
+
+async function cacheUser(user) {
+  const cached = await db.get('users', user.id);
+  current = { ...user, settings: cached?.settings || current?.settings || { ...DEFAULT_SETTINGS } };
+  await db.put('users', current);
+  return current;
 }
 
 /**
- * Signs in with a Google profile (from google.parseCredential). Links to an existing local account with the
- * same email, otherwise creates a password-less account.
+ * Stores a new session from the server. A local account with the same email (from before the server, or an
+ * old cache) hands its settings and prompts over to the server account; the prompts are then uploaded by sync.
  */
-export async function loginWithGoogle(profile, { remember = true } = {}) {
-  const email = normalizeEmail(profile.email);
-  let user = await db.getByIndex('users', 'email', email);
-  if (user) {
-    if (user.googleSub && user.googleSub !== profile.sub) throw new Error('این ایمیل به حساب گوگل دیگری متصل است.');
-    user = { ...user, googleSub: profile.sub, avatar: user.avatar || (await pictureToAvatar(profile.picture)), updatedAt: Date.now() };
-  } else {
-    user = {
-      id: db.uid(),
-      name: profile.name.trim().slice(0, 80) || email.split('@')[0],
-      email,
-      salt: null,
-      passHash: null,
-      googleSub: profile.sub,
-      avatar: await pictureToAvatar(profile.picture),
-      color: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
-      settings: { ...DEFAULT_SETTINGS },
-      createdAt: Date.now(),
-    };
+async function adopt(res, via, remember) {
+  api.setToken(res.token, remember);
+  const user = res.user;
+  const previous = await db.getByIndex('users', 'email', user.email);
+  const cached = await db.get('users', user.id);
+  let carried = cached?.settings;
+  if (previous && previous.id !== user.id) {
+    carried ||= previous.settings;
+    const rows = await db.getAllByIndex('prompts', 'userId', previous.id);
+    if (rows.length) await db.putMany('prompts', rows.map((r) => ({ ...r, userId: user.id, dirty: true, updatedAt: Math.max(Number(r.updatedAt) || 0, Number(r.createdAt) || 0, 1) })));
+    await db.remove('users', previous.id);
   }
-  await db.put('users', user);
-  current = user;
-  viaGoogle = true;
-  persistSession(user.id, remember);
-  return user;
+  current = { ...user, settings: { ...DEFAULT_SETTINGS, ...(carried || {}) } };
+  await db.put('users', current);
+  persist(user.id, via, remember);
+  announce();
+  return current;
 }
 
-/** Copies the Google profile photo into a local data URL; falls back to the remote URL if CORS blocks it. */
-async function pictureToAvatar(url) {
-  if (!url) return null;
-  try {
-    const res = await fetch(url, { mode: 'cors', referrerPolicy: 'no-referrer' });
-    if (!res.ok) throw new Error();
-    const blob = await res.blob();
-    return await imageFileToAvatar(new File([blob], 'google.jpg', { type: blob.type || 'image/jpeg' }));
-  } catch {
-    return url;
+/** A pre-server local account for this email, if this browser has one. */
+async function legacyAccount(email) {
+  const user = await db.getByIndex('users', 'email', normalizeEmail(email));
+  return user && (user.passHash || user.googleSub) && !user.hasPassword && user.salt !== undefined ? user : null;
+}
+
+export async function register({ name, email, password, remember = true, avatar }) {
+  validate({ name, email, password });
+  const clientSalt = randomSalt();
+  const key = await hashPassword(password, clientSalt);
+  const legacy = await legacyAccount(email);
+  const res = await api.request('POST', '/auth/register', {
+    name: String(name).trim(),
+    email: normalizeEmail(email),
+    clientSalt,
+    key,
+    avatar: avatar ?? (legacy?.avatar?.startsWith('data:') ? legacy.avatar : null),
+    remember,
+  });
+  pendingRecovery = res.recoveryCode;
+  return adopt(res, 'password', remember);
+}
+
+/** Whether an account exists for this email (drives the email-first sign-in step). */
+export async function lookupAccount(email) {
+  const info = await api.request('POST', '/auth/lookup', { email: normalizeEmail(email) });
+  if (info.exists) return { exists: true, hasPassword: info.hasPassword };
+  const legacy = await legacyAccount(email);
+  return { exists: Boolean(legacy?.passHash), hasPassword: Boolean(legacy?.passHash) };
+}
+
+export async function login({ email, password, remember = true }) {
+  const e = normalizeEmail(email);
+  const info = await api.request('POST', '/auth/lookup', { email: e });
+  if (!info.exists) {
+    // First sign-in since accounts moved to the server: check the old local password, then create the account.
+    const legacy = await legacyAccount(e);
+    if (legacy?.passHash && (await hashPassword(String(password || ''), legacy.salt)) === legacy.passHash) {
+      return { ...(await register({ name: legacy.name, email: e, password, remember })), migrated: true };
+    }
+    throw new Error('ایمیل یا رمز عبور اشتباه است.');
   }
+  if (!info.hasPassword) throw new Error('این حساب با گوگل ساخته شده است؛ با دکمه «ادامه با گوگل» وارد شوید.');
+  const res = await api.request('POST', '/auth/login', { email: e, key: await hashPassword(String(password || ''), info.clientSalt), remember });
+  return adopt(res, 'password', remember);
+}
+
+/**
+ * Signs in with a Google ID token (the server verifies Google's signature). The returned user carries
+ * `passwordRemoved` when an unverified password on the same email was dropped for safety.
+ */
+export async function loginWithGoogle(credential, { remember = true } = {}) {
+  const res = await api.request('POST', '/auth/google', { credential, remember });
+  const user = await adopt(res, 'google', remember);
+  return { ...user, passwordRemoved: Boolean(res.passwordRemoved) };
+}
+
+/** Resets a forgotten password with the recovery code; signs in and returns a fresh recovery code. */
+export async function resetPassword({ email, code, password, remember = true }) {
+  validate({ password });
+  const e = normalizeEmail(email);
+  const info = await api.request('POST', '/auth/lookup', { email: e });
+  if (!info.exists) throw new Error('ایمیل یا کد بازیابی اشتباه است.');
+  const res = await api.request('POST', '/auth/reset', { email: e, code, key: await hashPassword(password, info.clientSalt), remember });
+  await adopt(res, 'password', remember);
+  return res.recoveryCode;
+}
+
+/** Returns the registration code once, otherwise creates a new one (the previous code stops working). */
+export async function createRecoveryCode() {
+  if (pendingRecovery) {
+    const code = pendingRecovery;
+    pendingRecovery = null;
+    return code;
+  }
+  const res = await api.request('POST', '/me/recovery');
+  await cacheUser(res.user);
+  return res.recoveryCode;
+}
+
+export function hasRecoveryCode() {
+  return Boolean(current?.hasRecovery);
 }
 
 export function hasPassword() {
-  return Boolean(current?.passHash);
+  return Boolean(current?.hasPassword);
+}
+
+export function isAdmin() {
+  return Boolean(current?.admin);
 }
 
 /** Whether changing the password needs the old one (not for Google-only accounts or a Google-opened session). */
 export function needsOldPassword() {
-  return Boolean(current?.passHash) && !viaGoogle;
+  return Boolean(current?.hasPassword) && readStored(VIA_KEY) !== 'google';
 }
 
-export function logout() {
+function signOutLocally() {
   current = null;
-  viaGoogle = false;
+  pendingRecovery = null;
+  api.setToken(null);
   try {
-    localStorage.removeItem(SESSION_KEY);
-    sessionStorage.removeItem(SESSION_KEY);
+    for (const k of [SESSION_KEY, VIA_KEY]) { localStorage.removeItem(k); sessionStorage.removeItem(k); }
   } catch { /* ignore */ }
 }
 
-async function save(patch) {
+export function logout() {
+  if (api.token()) api.request('POST', '/auth/logout').catch(() => {});
+  signOutLocally();
+  announce();
+}
+
+async function saveProfile(patch) {
   if (!current) throw new Error('ابتدا وارد شوید.');
-  current = { ...current, ...patch, updatedAt: Date.now() };
-  await db.put('users', current);
+  const { user } = await api.request('POST', '/me', patch);
+  await cacheUser(user);
+  announce();
   return current;
 }
 
 export async function updateProfile({ name, email }) {
   validate({ name, email }, { requirePassword: false });
-  const normalized = normalizeEmail(email);
-  if (normalized !== current.email) {
-    const other = await db.getByIndex('users', 'email', normalized);
-    if (other && other.id !== current.id) throw new Error('این ایمیل برای حساب دیگری استفاده شده است.');
-  }
-  return save({ name: String(name).trim(), email: normalized });
-}
-
-export async function updateSettings(patch) {
-  return save({ settings: { ...settings(), ...patch } });
-}
-
-export async function changePassword(oldPassword, newPassword) {
-  // Google-only accounts, or sessions opened with Google (forgot-password path), may set one without the old password.
-  if (needsOldPassword() && (await hashPassword(String(oldPassword || ''), current.salt)) !== current.passHash) {
-    throw new Error('رمز عبور فعلی اشتباه است.');
-  }
-  validate({ password: newPassword });
-  const salt = randomSalt();
-  return save({ salt, passHash: await hashPassword(newPassword, salt) });
+  return saveProfile({ name: String(name).trim(), email: normalizeEmail(email) });
 }
 
 export async function setAvatar(dataUrl) {
-  return save({ avatar: dataUrl });
+  return saveProfile({ avatar: dataUrl || null });
 }
 
-/** `confirmation` is the password, or the account email for Google-only accounts. */
+/** Settings (engine, API key, defaults) stay on this device; the API key is never sent to our server. */
+export async function updateSettings(patch) {
+  if (!current) throw new Error('ابتدا وارد شوید.');
+  current = { ...current, settings: { ...settings(), ...patch } };
+  await db.put('users', current);
+  return current;
+}
+
+async function clientSalt() {
+  const info = await api.request('POST', '/auth/lookup', { email: current.email });
+  if (!info.clientSalt) throw new Error('حساب پیدا نشد.');
+  return info.clientSalt;
+}
+
+export async function changePassword(oldPassword, newPassword) {
+  validate({ password: newPassword });
+  const salt = await clientSalt();
+  const body = { key: await hashPassword(newPassword, salt) };
+  if (needsOldPassword()) body.oldKey = await hashPassword(String(oldPassword || ''), salt);
+  const { user } = await api.request('POST', '/me/password', body);
+  await cacheUser(user);
+  return current;
+}
+
+/** `confirmation` is the password, or the account email for Google-only accounts. Removes it everywhere. */
 export async function deleteAccount(confirmation) {
-  const ok = current.passHash
-    ? (await hashPassword(String(confirmation || ''), current.salt)) === current.passHash
-    : normalizeEmail(confirmation) === current.email;
-  if (!ok) throw new Error(current.passHash ? 'رمز عبور اشتباه است.' : 'ایمیل وارد شده با ایمیل حساب یکسان نیست.');
-  const prompts = await db.getAllByIndex('prompts', 'userId', current.id);
-  await db.removeMany('prompts', prompts.map((p) => p.id));
+  const body = current.hasPassword
+    ? { key: await hashPassword(String(confirmation || ''), await clientSalt()) }
+    : { email: normalizeEmail(confirmation) };
+  await api.request('POST', '/me/delete', body);
+  const rows = await db.getAllByIndex('prompts', 'userId', current.id);
+  await db.removeMany('prompts', rows.map((p) => p.id));
   await db.remove('users', current.id);
-  logout();
+  signOutLocally();
+  announce();
 }
 
 /** Center-crops and re-encodes an uploaded image to a small square (drops any embedded payload). */

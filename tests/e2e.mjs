@@ -4,6 +4,8 @@
 
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
+import worker, { Store } from '../worker/src/index.js';
+import { fakeSqlNamespace, GOOGLE_JWKS, googleIdToken } from './fake-cloudflare.mjs';
 
 const BASE = process.argv[2] || 'http://localhost:8765/';
 const requests = [];
@@ -37,6 +39,18 @@ await context.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
 // Google sign-in: enable it with a test client ID and replace Google's script with a stub that returns a signed-in user.
 const GOOGLE_ID = 'test-client.apps.googleusercontent.com';
 const FREE_API = 'https://promptcreator-api.test.workers.dev';
+// Accounts and sync run on the real worker code (in this process, SQLite in memory); only Gemini is mocked.
+const serverEnv = { ALLOWED_ORIGINS: new URL(BASE).origin, GOOGLE_CLIENT_ID: GOOGLE_ID, ADMIN_EMAIL: 'maryam@gmail.com' };
+serverEnv.STORE = fakeSqlNamespace(Store, serverEnv);
+const nodeFetch = globalThis.fetch;
+globalThis.fetch = (url, init) => (String(url) === 'https://www.googleapis.com/oauth2/v3/certs' ? Promise.resolve(Response.json(GOOGLE_JWKS)) : nodeFetch(url, init));
+async function forwardToWorker(route) {
+  const req = route.request();
+  const body = ['GET', 'HEAD', 'OPTIONS'].includes(req.method()) ? undefined : req.postDataBuffer();
+  const res = await worker.fetch(new Request(req.url(), { method: req.method(), headers: req.headers(), body }), serverEnv);
+  return route.fulfill({ status: res.status, headers: Object.fromEntries(res.headers), body: Buffer.from(await res.arrayBuffer()) });
+}
+const isAccountCall = (url) => /\/(auth|me|sync|admin)(\/|\?|$)/.test(new URL(url).pathname);
 const CONFIG_JS = `export const GOOGLE_CLIENT_ID = '${GOOGLE_ID}';\nexport const FREE_API_URL = '${FREE_API}';\nexport const ANDROID_APK_URL = 'https://github.com/mrasoul10-sudo/promptcreator/releases/download/android-latest/promptsaz.apk';\nexport const ANDROID_RELEASES_URL = 'https://github.com/mrasoul10-sudo/promptcreator/releases/latest';`;
 await context.route(/assets\/js\/config\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: CONFIG_JS }));
 
@@ -46,6 +60,7 @@ let freeRemaining = 20;
 const transcribeRequests = [];
 await context.route(`${FREE_API}/**`, async (route) => {
   const req = route.request();
+  if (isAccountCall(req.url())) return forwardToWorker(route);
   const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'GET, POST, OPTIONS' };
   if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
   if (req.url().endsWith('/quota')) return route.fulfill({ headers: cors, contentType: 'application/json', body: JSON.stringify({ remaining: freeRemaining, limit: 20 }) });
@@ -63,8 +78,7 @@ await context.route(`${FREE_API}/**`, async (route) => {
   const result = { title: m.title, detectedLanguage: m.detected_language, promptEn: body.lang === 'fa' ? '' : m.prompt_en, promptFa: body.lang === 'en' ? '' : m.prompt_fa, notes: m.notes };
   return route.fulfill({ headers: cors, contentType: 'application/json', body: JSON.stringify({ result, model: 'gemini-flash', usage: { input: 1, output: 1 }, remaining: freeRemaining }) });
 });
-const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
-const idToken = `${b64url({ alg: 'none' })}.${b64url({ iss: 'https://accounts.google.com', aud: GOOGLE_ID, sub: 'g-123', email: 'maryam@gmail.com', email_verified: true, name: 'مریم گوگلی', exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
+const idToken = googleIdToken({ aud: GOOGLE_ID, sub: 'g-123', email: 'maryam@gmail.com', name: 'مریم گوگلی' });
 await context.route('https://accounts.google.com/gsi/client', (r) => r.fulfill({
   contentType: 'text/javascript',
   body: `window.google = { accounts: { id: {
@@ -196,7 +210,7 @@ assert.equal(await page.textContent('#auth-email-text'), 'test@example.com');
 await page.fill('#auth-form input[name=name]', 'رسول تست');
 await page.fill('#auth-form input[name=password]', 'secret123');
 await page.click('#auth-form button[type=submit]');
-await page.waitForSelector('.recovery-code');
+await page.waitForSelector('.recovery-code', { timeout: 8000 }).catch(async (e) => { console.log('DEBUG', await page.textContent('.modal').catch(() => ''), errors); throw e; });
 const recoveryCode = (await page.textContent('.recovery-code')).trim();
 assert.match(recoveryCode, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
 await page.click('.modal-foot button:has-text("ذخیره کردم")');
@@ -447,6 +461,23 @@ assert.equal(await page.locator('#password-form input[name=old]').count(), 0, 'G
 assert.equal(await page.textContent('.stats strong'), '۰', 'Google account starts empty');
 step('Google sign-in works and creates its own account');
 
+// Admin panel: shown to the admin email once signed in with Google (the server enforces it)
+await page.waitForSelector('.sb-nav a[href="#/admin"]', { state: 'attached' });
+await page.evaluate(() => { location.hash = '#/admin'; });
+await page.waitForSelector('#admin-stats .stat-card strong');
+await page.waitForSelector('#admin-list .admin-row');
+assert.equal(await page.locator('#admin-list .admin-row').count(), 2, 'both accounts listed');
+const testRow = page.locator('#admin-list .admin-row', { hasText: 'test@example.com' });
+assert.match(await testRow.textContent(), /۳ پرامپت|[۱-۹] پرامپت/, 'prompt count (not content) shown');
+await testRow.locator('[data-act=block]').click();
+await page.click('.modal [data-action="1"]');
+await page.waitForSelector('#admin-list .admin-row.is-blocked');
+await page.locator('#admin-list .admin-row.is-blocked [data-act=unblock]').click();
+await page.click('.modal [data-action="1"]');
+await page.waitForSelector('#admin-list .admin-row.is-blocked', { state: 'detached' });
+await page.evaluate(() => { location.hash = '#/studio'; });
+step('admin panel: stats, users, block and unblock');
+
 // What's new: a returning user sees the changes since their last visit once
 await page.evaluate(() => { localStorage.setItem('pc.whatsNewSeen', '1'); location.hash = '#/studio'; });
 await page.waitForSelector('#composer');
@@ -505,6 +536,7 @@ step('Android banner shown in browsers, dismissible, hidden in the app');
 // Android app with the native plugin: update prompt for a newer APK, and native Google sign-in
 const newApp = await browser.newContext({ viewport: { width: 390, height: 800 }, userAgent: 'Mozilla/5.0 (Linux; Android 14; wv) Chrome/130.0 Mobile PromptSazApp/5' });
 await newApp.route(/assets\/js\/config\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: CONFIG_JS }));
+await newApp.route(`${FREE_API}/**`, (r) => (isAccountCall(r.request().url()) ? forwardToWorker(r) : r.fulfill({ status: 404, body: '{}' })));
 await newApp.route(/assets\/android-version\.json/, (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ versionCode: 7, versionName: '1.0.7', apkUrl: 'https://github.com/x/y.apk' }) }));
 await newApp.addInitScript((token) => {
   window.Capacitor = { Plugins: {
@@ -538,6 +570,91 @@ await op.waitForSelector('#auth-form');
 assert.equal(await op.locator('#google-slot').count(), 0, 'old APK without the plugin: no Google button');
 await oldApp.close();
 step('Android app: update prompt for a newer APK, native Google sign-in');
+
+// Same account on another device (e.g. the phone app): its prompts arrive, and changes flow back
+const device = async (label) => {
+  const ctx = await browser.newContext({ viewport: { width: 1100, height: 800 }, bypassCSP: true });
+  await ctx.route(/assets\/js\/config\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: CONFIG_JS }));
+  await ctx.route(`${FREE_API}/**`, (r) => (isAccountCall(r.request().url()) ? forwardToWorker(r)
+    : r.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ remaining: 20, limit: 20 }) })));
+  const p = await ctx.newPage();
+  p.on('pageerror', (e) => errors.push(`${label}: ${e.message}`));
+  await p.goto(BASE);
+  await p.waitForSelector('#composer');
+  return { ctx, p };
+};
+const signIn = async (p, email, password, { recovery = false } = {}) => {
+  await p.click('.topbar [data-login="login"]');
+  await p.fill('#auth-form input[name=email]', email);
+  await p.click('#auth-form button[type=submit]');
+  await p.waitForSelector('#auth-form input[name=password]:visible');
+  await p.fill('#auth-form input[name=password]', password);
+  await p.click('#auth-form button[type=submit]');
+  if (recovery) {
+    await p.waitForSelector('.recovery-code');
+    await p.click('.modal-foot button:has-text("ذخیره کردم")');
+  }
+  await p.waitForSelector('#user-menu-btn');
+};
+const synced = (p) => p.waitForFunction(() => new Promise((resolve) => {
+  const req = indexedDB.open('promptcreator');
+  req.onsuccess = () => {
+    const all = req.result.transaction('prompts').objectStore('prompts').getAll();
+    all.onsuccess = () => resolve(all.result.every((r) => !r.dirty));
+  };
+}), null, { polling: 300, timeout: 10000 });
+
+const phone = await device('phone');
+await signIn(phone.p, 'test@example.com', 'newpass789');
+await phone.p.waitForSelector('#sb-recent .sb-link:has-text("لوگوی مینیمال کافه")');
+const phoneCount = await phone.p.locator('#sb-recent .sb-link').count();
+assert.ok(phoneCount >= 2, `prompts from the first device arrive: ${phoneCount}`);
+await phone.p.hover('#sb-recent .sb-row');
+await phone.p.click('#sb-recent .sb-row .sb-pin');
+await phone.p.waitForSelector('#sb-recent .sb-pinned .sb-link');
+await synced(phone.p);
+const laptop = await device('laptop');
+await signIn(laptop.p, 'test@example.com', 'newpass789');
+await laptop.p.waitForSelector('#sb-recent .sb-pinned .sb-link', { timeout: 10000 });
+assert.equal(await laptop.p.locator('#sb-recent .sb-link').count(), phoneCount, 'same prompts on every device');
+await laptop.ctx.close();
+await phone.ctx.close();
+step('sync: same account on another device sees the same prompts; a pin made there arrives');
+
+// An account from before the server (only in this browser) moves to the server at its next sign-in
+const legacy = await device('legacy');
+await legacy.p.evaluate(async () => {
+  const enc = new TextEncoder();
+  const salt = '00112233445566778899aabbccddeeff';
+  const key = await crypto.subtle.importKey('raw', enc.encode('oldpass1'), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: Uint8Array.from(salt.match(/.{2}/g).map((h) => parseInt(h, 16))), iterations: 210000 }, key, 256);
+  const passHash = [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const db = await new Promise((resolve, reject) => {
+    const req = indexedDB.open('promptcreator', 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore('users', { keyPath: 'id' }).createIndex('email', 'email', { unique: true });
+      req.result.createObjectStore('prompts', { keyPath: 'id' }).createIndex('userId', 'userId', { unique: false });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  const tx = db.transaction(['users', 'prompts'], 'readwrite');
+  tx.objectStore('users').put({ id: 'legacy-1', name: 'کاربر قدیمی', email: 'old@example.com', salt, passHash, avatar: null, color: '#6366f1', settings: { engine: 'free' }, createdAt: 1 });
+  tx.objectStore('prompts').put({ id: 'legacy-p1', userId: 'legacy-1', source: 'متن قدیمی', title: 'پرامپت قدیمی', promptFa: 'نقش:\nآزمایش', promptEn: '', improvements: [], type: 'general', lang: 'fa', detail: 'balanced', notes: '', category: '', tags: [], favorite: false, archived: false, archivedAt: null, createdAt: 2, updatedAt: 2 });
+  await new Promise((resolve) => { tx.oncomplete = resolve; });
+  db.close();
+});
+await legacy.p.reload();
+await legacy.p.waitForSelector('#composer');
+await signIn(legacy.p, 'old@example.com', 'oldpass1', { recovery: true });
+await legacy.p.waitForSelector('#sb-recent .sb-link:has-text("پرامپت قدیمی")');
+await synced(legacy.p);
+await legacy.ctx.close();
+const other = await device('other');
+await signIn(other.p, 'old@example.com', 'oldpass1');
+await other.p.waitForSelector('#sb-recent .sb-link:has-text("پرامپت قدیمی")', { timeout: 10000 });
+await other.ctx.close();
+step('pre-server local account and its prompts move to the server at the next sign-in');
 
 assert.deepEqual(errors, [], `page errors: ${errors.join('\n')}`);
 await browser.close();

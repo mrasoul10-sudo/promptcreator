@@ -8,12 +8,21 @@
 //        body: { source, type, lang, detail }
 //   POST /transcribe -> { text, language, model }
 //        body: a 16 kHz mono WAV recording (content-type audio/wav), at most MAX_AUDIO_BYTES
+//
+// Accounts and synced prompts (Store Durable Object, see store.js; bearer token in Authorization):
+//   POST /auth/lookup | /auth/register | /auth/login | /auth/google | /auth/reset | /auth/logout
+//   GET  /me          POST /me (profile)   POST /me/password   POST /me/recovery   POST /me/delete
+//   POST /sync        { since, changes } -> { changes, cursor, more, rejected }
+//   GET  /admin/stats   GET /admin/users?q=&offset=   POST /admin/users/action { id, action }
 
 import {
   SYSTEM_PROMPT, OUTPUT_SCHEMA, MAX_SOURCE_LENGTH, ECHO_RETRY_NOTE, buildUserMessage, normalizeOptions, parseResult, isEcho,
   TRANSCRIBE_PROMPT, TRANSCRIPT_SCHEMA, MAX_AUDIO_BYTES,
 } from '../../assets/js/prompt-spec.js';
 import { findInappropriate, INAPPROPRIATE_MESSAGE } from '../../assets/js/moderation.js';
+import { Store } from './store.js';
+
+export { Store };
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -30,7 +39,7 @@ function json(body, status, origin) {
   if (origin) {
     headers['access-control-allow-origin'] = origin;
     headers['access-control-allow-methods'] = 'GET, POST, OPTIONS';
-    headers['access-control-allow-headers'] = 'content-type';
+    headers['access-control-allow-headers'] = 'content-type, authorization';
     headers['access-control-max-age'] = '86400';
   }
   return new Response(body === null ? null : JSON.stringify(body), { status, headers });
@@ -284,6 +293,105 @@ async function handleTranscribe(request, env, origin) {
   return fail(lastError?.status || 502, code, USER_MESSAGES[code] || USER_MESSAGES.upstream_error, origin, { detail });
 }
 
+// ---------- Accounts, sync, admin (Store Durable Object) ----------
+
+function storeStub(env) {
+  return env.STORE.get(env.STORE.idFromName('main'));
+}
+
+async function storeCall(env, op, args, origin) {
+  const res = await storeStub(env).fetch('https://store/', { method: 'POST', body: JSON.stringify({ op, ...args }) });
+  return json(await res.json(), res.status, origin);
+}
+
+function bearer(request) {
+  const m = (request.headers.get('authorization') || '').match(/^Bearer ([0-9a-f]{64})$/);
+  return m ? m[1] : null;
+}
+
+const b64urlBytes = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(s.length / 4) * 4, '=')), (c) => c.charCodeAt(0));
+const b64urlJson = (s) => JSON.parse(new TextDecoder().decode(b64urlBytes(s)));
+
+let googleKeys = { keys: [], expires: 0 };
+
+async function googleJwks(force = false) {
+  if (!force && googleKeys.expires > Date.now() && googleKeys.keys.length) return googleKeys.keys;
+  const res = await fetch('https://www.googleapis.com/oauth2/v3/certs');
+  if (!res.ok) throw new Error(`jwks ${res.status}`);
+  const maxAge = Number((res.headers.get('cache-control') || '').match(/max-age=(\d+)/)?.[1] || 3600);
+  googleKeys = { keys: (await res.json()).keys || [], expires: Date.now() + Math.min(maxAge, 86400) * 1000 };
+  return googleKeys.keys;
+}
+
+/** Verifies a Google ID token (RS256 signature against Google's published keys, audience, issuer, expiry). */
+async function verifyGoogleToken(credential, env) {
+  const parts = String(credential || '').split('.');
+  if (parts.length !== 3) return null;
+  let header;
+  let claims;
+  try {
+    header = b64urlJson(parts[0]);
+    claims = b64urlJson(parts[1]);
+  } catch {
+    return null;
+  }
+  if (header.alg !== 'RS256' || !header.kid) return null;
+  let jwk = (await googleJwks()).find((k) => k.kid === header.kid);
+  if (!jwk) jwk = (await googleJwks(true)).find((k) => k.kid === header.kid); // keys rotate
+  if (!jwk) return null;
+  const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+  const valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64urlBytes(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
+  const now = Math.floor(Date.now() / 1000);
+  if (!valid) return null;
+  if (claims.aud !== env.GOOGLE_CLIENT_ID) return null;
+  if (!['accounts.google.com', 'https://accounts.google.com'].includes(claims.iss)) return null;
+  if (!claims.exp || claims.exp < now - 60) return null;
+  if (!claims.email || claims.email_verified === false || claims.email_verified === 'false') return null;
+  return { sub: String(claims.sub), email: String(claims.email), name: String(claims.name || ''), picture: typeof claims.picture === 'string' ? claims.picture : null };
+}
+
+const ACCOUNT_ROUTES = {
+  'POST /auth/lookup': (b) => ['lookup', { email: b.email }],
+  'POST /auth/register': (b) => ['register', { name: b.name, email: b.email, clientSalt: b.clientSalt, key: b.key, avatar: b.avatar, remember: b.remember }],
+  'POST /auth/login': (b) => ['login', { email: b.email, key: b.key, remember: b.remember }],
+  'POST /auth/reset': (b) => ['reset', { email: b.email, code: b.code, key: b.key, remember: b.remember }],
+  'POST /auth/logout': (b, token) => ['logout', { token }],
+  'GET /me': (b, token) => ['me', { token }],
+  'POST /me': (b, token) => ['updateMe', { token, name: b.name, email: b.email, avatar: b.avatar }],
+  'POST /me/password': (b, token) => ['changePassword', { token, oldKey: b.oldKey, key: b.key }],
+  'POST /me/recovery': (b, token) => ['newRecovery', { token }],
+  'POST /me/delete': (b, token) => ['deleteMe', { token, key: b.key, email: b.email }],
+  'POST /sync': (b, token) => ['sync', { token, since: b.since, changes: b.changes }],
+  'GET /admin/users': (b, token, url) => ['adminUsers', { token, q: url.searchParams.get('q'), offset: url.searchParams.get('offset') }],
+  'POST /admin/users/action': (b, token) => ['adminAction', { token, id: b.id, action: b.action }],
+};
+
+async function handleAccount(request, env, origin, url) {
+  if (!env.STORE) return fail(503, 'not_configured', 'سرور حساب‌ها هنوز راه‌اندازی نشده است.', origin);
+  const route = `${request.method} ${url.pathname}`;
+  const token = bearer(request);
+  let body = {};
+  if (request.method === 'POST') {
+    if (Number(request.headers.get('content-length') || 0) > 2_500_000) return fail(413, 'too_long', 'درخواست بیش از حد بزرگ است.', origin);
+    body = (await request.json().catch(() => null)) || {};
+  }
+  if (route === 'POST /auth/google') {
+    if (!env.GOOGLE_CLIENT_ID) return fail(503, 'not_configured', 'ورود با گوگل پیکربندی نشده است.', origin);
+    const claims = await verifyGoogleToken(body.credential, env).catch((err) => { console.error('google verify', err); return null; });
+    if (!claims) return fail(401, 'bad_google', 'ورود با گوگل تأیید نشد. دوباره تلاش کنید.', origin);
+    return storeCall(env, 'google', { claims, remember: body.remember }, origin);
+  }
+  if (route === 'GET /admin/stats') {
+    // Today's free-service usage from the quota counter, next to the account numbers.
+    const q = await quotaCall(env, 'stats', { day: today(), limits: limits(env) }).catch(() => null);
+    return storeCall(env, 'adminStats', { token, quota: q }, origin);
+  }
+  const map = ACCOUNT_ROUTES[route];
+  if (!map) return null;
+  const [op, args] = map(body, token, url);
+  return storeCall(env, op, args, origin);
+}
+
 async function handleQuota(request, env, origin) {
   const visitor = await visitorId(request, env);
   const q = await quotaCall(env, 'peek', { visitor, day: today(), limits: limits(env) });
@@ -301,6 +409,10 @@ export default {
     if (url.pathname === '/quota' && request.method === 'GET') return handleQuota(request, env, origin);
     if (url.pathname === '/generate' && request.method === 'POST') return handleGenerate(request, env, origin);
     if (url.pathname === '/transcribe' && request.method === 'POST') return handleTranscribe(request, env, origin);
+    if (/^\/(auth|me|sync|admin)(\/|$)/.test(url.pathname)) {
+      const res = await handleAccount(request, env, origin, url);
+      if (res) return res;
+    }
     return fail(404, 'not_found', 'Not found', origin);
   },
 };
@@ -324,6 +436,9 @@ export class Quota {
     const mKey = `m:${minute}`;
     const [v = 0, g = 0, m = 0] = await Promise.all([this.storage.get(vKey), this.storage.get(gKey), this.storage.get(mKey)]);
 
+    if (action === 'stats') {
+      return Response.json({ usedToday: g, limitToday: lim.global, perVisitor: lim.perVisitor, perMinute: lim.perMinute });
+    }
     if (action === 'peek') {
       return Response.json({ remaining: Math.max(0, Math.min(lim.perVisitor - v, lim.global - g)), limit: lim.perVisitor });
     }

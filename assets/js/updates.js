@@ -1,10 +1,19 @@
 // "What's new" popup after a release, and the Android app's "new version available" prompt.
 // Add a CHANGELOG entry (newest first, id + 1) for every user-visible release.
 
-import { esc, icon, modal } from './ui.js?v=202609251322';
-import { ANDROID_APK_URL } from './config.js?v=202609251322';
+import { esc, icon, modal } from './ui.js?v=202609251412';
+import { ANDROID_APK_URL } from './config.js?v=202609251412';
 
 export const CHANGELOG = [
+  {
+    id: 4,
+    date: '۳ مهر ۱۴۰۵',
+    items: [
+      'حساب کاربری آنلاین: با همان ایمیل یا گوگل در سایت، اپ اندروید و هر دستگاهی وارد شوید و همه پرامپت‌هایتان را ببینید',
+      'همگام‌سازی خودکار: هر پرامپتی که بسازید، پین کنید، آرشیو یا حذف کنید، روی همه دستگاه‌ها اعمال می‌شود',
+      'اگر قبلاً حساب داشتید، یک بار دوباره وارد شوید؛ حساب و پرامپت‌های قبلی خودکار منتقل می‌شوند',
+    ],
+  },
   {
     id: 3,
     date: '۳ مهر ۱۴۰۵',

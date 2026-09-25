@@ -222,7 +222,7 @@ export function truncate(text, max = 220) {
 
 export function avatarHtml(user, size = 'md') {
   if (!user) return '';
-  if (user.avatar) return `<img class="avatar avatar-${size}" src="${esc(user.avatar)}" alt="">`;
+  if (user.avatar) return `<img class="avatar avatar-${size}" src="${esc(user.avatar)}" alt="" referrerpolicy="no-referrer">`;
   const letters = String(user.name || '?').trim().split(/\s+/).filter(Boolean);
   const text = letters.length > 1 ? letters[0][0] + letters[1][0] : (letters[0] || '?').slice(0, 2);
   return `<span class="avatar avatar-${size}" data-color="${esc(user.color || '#6366f1')}">${esc(text.toUpperCase())}</span>`;

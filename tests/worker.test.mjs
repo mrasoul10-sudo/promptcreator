@@ -2,7 +2,8 @@
 // Usage: node tests/worker.test.mjs
 
 import assert from 'node:assert/strict';
-import worker, { Quota } from '../worker/src/index.js';
+import worker, { Quota, Store } from '../worker/src/index.js';
+import { fakeSqlNamespace, GOOGLE_JWKS, googleIdToken } from './fake-cloudflare.mjs';
 import { formatPrompt } from '../assets/js/prompt-spec.js';
 
 // ---- Fake Durable Object namespace backed by a Map ----
@@ -27,6 +28,7 @@ const calls = [];
 let geminiMode = 'ok';
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init) => {
+  if (String(url) === 'https://www.googleapis.com/oauth2/v3/certs') return Response.json(GOOGLE_JWKS, { headers: { 'cache-control': 'max-age=3600' } });
   if (!String(url).startsWith('https://generativelanguage.googleapis.com/')) return realFetch(url, init);
   const body = JSON.parse(init.body);
   calls.push({ url: String(url), headers: init.headers, body });
@@ -65,7 +67,10 @@ const env = {
   DAILY_LIMIT_GLOBAL: '100',
   PER_MINUTE_LIMIT_GLOBAL: '50',
   QUOTA: fakeNamespace(),
+  GOOGLE_CLIENT_ID: 'test-client.apps.googleusercontent.com',
+  ADMIN_EMAIL: 'boss@example.com',
 };
+env.STORE = fakeSqlNamespace(Store, env);
 
 const req = (path, { method = 'POST', body, origin = ORIGIN, ip = '1.2.3.4' } = {}) => new Request(`https://api.test${path}`, {
   method,
@@ -216,6 +221,119 @@ assert.ok([...env.QUOTA.map.keys()].every((k) => !k.includes('1.2.3.4')));
   assert.equal((await send(wav, 'audio/wav', '8.8.8.8')).status, 502);
   geminiMode = 'ok';
   for (let i = 0; i < 5; i += 1) assert.equal((await send(wav, 'audio/wav', '8.8.8.8')).status, 200, 'refunded after failure');
+}
+
+// ---------- Accounts, sync, admin ----------
+{
+  const api = async (method, path, body, token, ip = '5.5.5.5') => {
+    const res = await worker.fetch(new Request(`https://api.test${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', origin: ORIGIN, 'cf-connecting-ip': ip, ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    }), env);
+    return { status: res.status, body: await res.json(), cors: res.headers.get('access-control-allow-headers') };
+  };
+  const key = (c) => c.repeat(64);
+  const salt = 'a'.repeat(32);
+
+  // Register, lookup, login, wrong password
+  let r = await api('POST', '/auth/lookup', { email: 'Sara@Example.com' });
+  assert.deepEqual(r.body, { exists: false });
+  assert.ok(r.cors.includes('authorization'), 'CORS allows the bearer header');
+  r = await api('POST', '/auth/register', { name: 'سارا', email: 'Sara@Example.com', clientSalt: salt, key: key('1'), remember: true });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.match(r.body.token, /^[0-9a-f]{64}$/);
+  assert.match(r.body.recoveryCode, /^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+  assert.equal(r.body.user.email, 'sara@example.com');
+  assert.equal(r.body.user.admin, false);
+  const sara = r.body;
+  assert.equal((await api('POST', '/auth/register', { name: 'x2', email: 'sara@example.com', clientSalt: salt, key: key('2') })).status, 409);
+  r = await api('POST', '/auth/lookup', { email: 'sara@example.com' });
+  assert.deepEqual(r.body, { exists: true, clientSalt: salt, hasPassword: true, google: false });
+  assert.equal((await api('POST', '/auth/login', { email: 'sara@example.com', key: key('2') })).status, 401);
+  r = await api('POST', '/auth/login', { email: 'sara@example.com', key: key('1') });
+  assert.equal(r.status, 200);
+  const sara2 = r.body.token;
+  assert.equal((await api('GET', '/me', null, 'f'.repeat(64))).status, 401, 'unknown token refused');
+  assert.equal((await api('GET', '/me', null, sara2)).body.user.name, 'سارا');
+
+  // Sync: push, pull on another device, last write wins, tombstones
+  r = await api('POST', '/sync', { since: 0, changes: [
+    { id: 'p1', source: 'a', title: 'one', createdAt: 1, updatedAt: 100, archived: false },
+    { id: 'p2', source: 'b', title: 'two', createdAt: 2, updatedAt: 100, archived: true, userId: 'local', dirty: true },
+  ] }, sara.token);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.changes.length, 2);
+  assert.equal(r.body.changes[1].userId, undefined, 'local-only fields are not stored');
+  const cursor1 = r.body.cursor;
+  r = await api('POST', '/sync', { since: 0, changes: [] }, sara2);
+  assert.deepEqual(r.body.changes.map((c) => c.id).sort(), ['p1', 'p2'], 'second device pulls everything');
+  r = await api('POST', '/sync', { since: cursor1, changes: [{ id: 'p1', source: 'a', title: 'stale', updatedAt: 50 }] }, sara2);
+  assert.equal(r.body.changes.length, 0, 'older write ignored');
+  r = await api('POST', '/sync', { since: cursor1, changes: [{ id: 'p1', source: 'a', title: 'newer', updatedAt: 200 }, { id: 'p2', deleted: true, updatedAt: 300 }] }, sara2);
+  assert.equal(r.body.changes.length, 2);
+  r = await api('POST', '/sync', { since: cursor1, changes: [] }, sara.token);
+  assert.equal(r.body.changes.find((c) => c.id === 'p1').title, 'newer');
+  assert.deepEqual(r.body.changes.find((c) => c.id === 'p2'), { id: 'p2', deleted: true, updatedAt: 300 });
+  assert.equal((await api('POST', '/sync', { since: 0, changes: [{ id: 'bad id!', updatedAt: 1 }] }, sara.token)).body.rejected[0], 'bad id!');
+  assert.equal((await api('POST', '/sync', { since: 0, changes: [] })).status, 401, 'sync needs a session');
+
+  // Recovery code resets the password
+  assert.equal((await api('POST', '/auth/reset', { email: 'sara@example.com', code: 'WRONG-CODE-1234', key: key('3') })).status, 401);
+  r = await api('POST', '/auth/reset', { email: 'sara@example.com', code: sara.recoveryCode.toLowerCase(), key: key('3') });
+  assert.equal(r.status, 200);
+  assert.notEqual(r.body.recoveryCode, sara.recoveryCode, 'a fresh code replaces the used one');
+  assert.equal((await api('GET', '/me', null, sara.token)).status, 401, 'reset signs out other sessions');
+  assert.equal((await api('POST', '/auth/login', { email: 'sara@example.com', key: key('3') })).status, 200);
+
+  // Google: bad signature refused; first sign-in creates an account
+  const forged = googleIdToken({ aud: env.GOOGLE_CLIENT_ID, sub: 'g1', email: 'boss@example.com' }).replace(/\.[^.]+$/, '.AAAA');
+  assert.equal((await api('POST', '/auth/google', { credential: forged })).status, 401);
+  assert.equal((await api('POST', '/auth/google', { credential: googleIdToken({ aud: 'other-client', sub: 'g1', email: 'boss@example.com' }) })).status, 401, 'wrong audience');
+
+  // Pre-hijack guard + admin: someone registers the admin email with a password; the real owner then signs in with Google
+  r = await api('POST', '/auth/register', { name: 'attacker', email: 'boss@example.com', clientSalt: salt, key: key('9') });
+  const attacker = r.body.token;
+  assert.equal(r.body.user.admin, false, 'an unverified password account is never admin');
+  assert.equal((await api('GET', '/admin/stats', null, attacker)).status, 403);
+  r = await api('POST', '/auth/google', { credential: googleIdToken({ aud: env.GOOGLE_CLIENT_ID, sub: 'g-boss', email: 'boss@example.com', name: 'Boss' }) });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.passwordRemoved, true);
+  assert.equal(r.body.user.admin, true, 'admin after Google proves the email');
+  const boss = r.body.token;
+  assert.equal((await api('GET', '/me', null, attacker)).status, 401, 'old sessions revoked');
+  assert.equal((await api('POST', '/auth/login', { email: 'boss@example.com', key: key('9') })).status, 400, 'old password removed');
+
+  // Admin panel
+  r = await api('GET', '/admin/stats', null, boss);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.users.total, 2);
+  assert.equal(r.body.prompts.total, 1, 'deleted prompts not counted');
+  assert.ok(r.body.quota && typeof r.body.quota.usedToday === 'number');
+  r = await api('GET', '/admin/users?q=sara', null, boss);
+  assert.equal(r.body.users.length, 1);
+  assert.equal(r.body.users[0].prompts, 1);
+  const saraId = r.body.users[0].id;
+  const saraNow = (await api('POST', '/auth/login', { email: 'sara@example.com', key: key('3') })).body.token;
+  assert.equal((await api('POST', '/admin/users/action', { id: saraId, action: 'block' }, saraNow)).status, 403, 'non-admin cannot act');
+  assert.equal((await api('POST', '/admin/users/action', { id: saraId, action: 'block' }, boss)).status, 200);
+  assert.equal((await api('POST', '/auth/login', { email: 'sara@example.com', key: key('3') })).status, 403, 'blocked user cannot sign in');
+  assert.equal((await api('POST', '/admin/users/action', { id: saraId, action: 'unblock' }, boss)).status, 200);
+  assert.equal((await api('POST', '/auth/login', { email: 'sara@example.com', key: key('3') })).status, 200);
+
+  // Profile, password change, account deletion
+  r = await api('POST', '/auth/login', { email: 'sara@example.com', key: key('3') });
+  const s3 = r.body.token;
+  assert.equal((await api('POST', '/me', { name: 'سارا ک', avatar: 'javascript:alert(1)' }, s3)).status, 400, 'avatar must be an image');
+  assert.equal((await api('POST', '/me', { name: 'سارا ک' }, s3)).body.user.name, 'سارا ک');
+  assert.equal((await api('POST', '/me/password', { oldKey: key('1'), key: key('4') }, s3)).status, 401);
+  assert.equal((await api('POST', '/me/password', { oldKey: key('3'), key: key('4') }, s3)).status, 200);
+  assert.equal((await api('POST', '/me/delete', { key: key('3') }, s3)).status, 401);
+  assert.equal((await api('POST', '/me/delete', { key: key('4') }, s3)).status, 200);
+  assert.equal((await api('POST', '/auth/lookup', { email: 'sara@example.com' })).body.exists, false);
+  // Brute force: 10 failures per hour per email
+  for (let i = 0; i < 10; i += 1) assert.equal((await api('POST', '/auth/login', { email: 'nobody@example.com', key: key('7') })).status, 401);
+  assert.equal((await api('POST', '/auth/login', { email: 'nobody@example.com', key: key('7') })).status, 429);
 }
 
 // Prompt layout: a one-paragraph answer gets headings and numbered items on their own lines; Persian punctuation is fixed.

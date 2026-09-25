@@ -1,9 +1,22 @@
 // Prompt records: history (every generation) and archive (records the user chose to keep).
+// Kept in IndexedDB and synced to the account server by sync.js: every local write sets `dirty` (upload pending)
+// and a fresh `updatedAt` (last write wins); deleting leaves a `deleted` tombstone until the server has it.
 
-import * as db from './db.js?v=202609251322';
-import { formatPrompt } from './prompt-spec.js?v=202609251322';
+import * as db from './db.js?v=202609251412';
+import { formatPrompt } from './prompt-spec.js?v=202609251412';
 
 const EDITABLE = ['title', 'promptEn', 'promptFa', 'notes', 'category', 'tags', 'favorite'];
+
+/** Tells sync.js that there is something to upload. */
+function changed() {
+  window.dispatchEvent(new CustomEvent('pc:local-change'));
+}
+
+async function write(row) {
+  const saved = await db.put('prompts', { ...row, dirty: true });
+  changed();
+  return saved;
+}
 
 // Prompts saved before formatPrompt existed may be one long paragraph; tidy them on read (stored data is untouched).
 function tidy(row) {
@@ -14,12 +27,12 @@ function tidy(row) {
 
 export async function listForUser(userId) {
   const rows = await db.getAllByIndex('prompts', 'userId', userId);
-  return rows.map(tidy).sort((a, b) => b.createdAt - a.createdAt);
+  return rows.filter((r) => !r.deleted).map(tidy).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export async function create(userId, data) {
   const now = Date.now();
-  return db.put('prompts', {
+  return write({
     id: db.uid(),
     userId,
     source: data.source,
@@ -45,7 +58,7 @@ export async function create(userId, data) {
 
 async function owned(userId, id) {
   const row = await db.get('prompts', id);
-  if (!row || row.userId !== userId) throw new Error('پرامپت پیدا نشد.');
+  if (!row || row.userId !== userId || row.deleted) throw new Error('پرامپت پیدا نشد.');
   return row;
 }
 
@@ -60,23 +73,23 @@ export async function update(userId, id, patch) {
   if ('tags' in clean) clean.tags = normalizeTags(clean.tags);
   if ('category' in clean) clean.category = String(clean.category || '').trim().slice(0, 60);
   if ('title' in clean) clean.title = String(clean.title || '').trim().slice(0, 160);
-  return db.put('prompts', { ...row, ...clean, updatedAt: Date.now() });
+  return write({ ...row, ...clean, updatedAt: Date.now() });
 }
 
 export async function archive(userId, id, meta = {}) {
   const row = await update(userId, id, meta);
-  return db.put('prompts', { ...row, archived: true, archivedAt: row.archivedAt || Date.now() });
+  return write({ ...row, archived: true, archivedAt: row.archivedAt || Date.now(), updatedAt: Date.now() });
 }
 
 export async function unarchive(userId, id) {
   const row = await owned(userId, id);
-  return db.put('prompts', { ...row, archived: false, archivedAt: null, updatedAt: Date.now() });
+  return write({ ...row, archived: false, archivedAt: null, updatedAt: Date.now() });
 }
 
 /** Pins a prompt to the top of the sidebar (like pinned chats) or unpins it. */
 export async function setPinned(userId, id, pinned) {
   const row = await owned(userId, id);
-  return db.put('prompts', { ...row, pinned: Boolean(pinned), pinnedAt: pinned ? Date.now() : null });
+  return write({ ...row, pinned: Boolean(pinned), pinnedAt: pinned ? Date.now() : null, updatedAt: Date.now() });
 }
 
 /** Pinned prompts, most recently pinned first. */
@@ -84,15 +97,20 @@ export function pinnedOf(rows) {
   return rows.filter((r) => r.pinned).sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
 }
 
+const tombstone = (row) => ({ id: row.id, userId: row.userId, deleted: true, dirty: true, updatedAt: Math.max(Date.now(), (Number(row.updatedAt) || 0) + 1) });
+
 export async function remove(userId, id) {
-  await owned(userId, id);
-  return db.remove('prompts', id);
+  const row = await owned(userId, id);
+  await db.put('prompts', tombstone(row));
+  changed();
 }
 
 /** Removes history entries that were never archived. */
 export async function clearHistory(userId) {
-  const rows = await db.getAllByIndex('prompts', 'userId', userId);
-  return db.removeMany('prompts', rows.filter((r) => !r.archived).map((r) => r.id));
+  const rows = (await db.getAllByIndex('prompts', 'userId', userId)).filter((r) => !r.archived && !r.deleted);
+  await db.putMany('prompts', rows.map(tombstone));
+  changed();
+  return rows.length;
 }
 
 export function normalizeTags(tags) {
@@ -178,7 +196,7 @@ export async function exportData(user) {
     version: 1,
     exportedAt: new Date().toISOString(),
     profile: { name: user.name, email: user.email },
-    prompts: rows.map(({ userId, ...rest }) => rest),
+    prompts: rows.map(({ userId, dirty, ...rest }) => rest),
   };
 }
 
@@ -216,8 +234,10 @@ export async function importData(userId, payload) {
       pinned: Boolean(p.pinned),
       pinnedAt: p.pinned ? Number(p.pinnedAt) || Date.now() : null,
       createdAt: Number(p.createdAt) || Date.now(),
-      updatedAt: Number(p.updatedAt) || Date.now(),
+      updatedAt: Date.now(),
+      dirty: true,
     }));
   await db.putMany('prompts', rows);
+  changed();
   return rows.length;
 }

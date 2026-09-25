@@ -125,6 +125,11 @@ jobs:
             -H 'content-type: audio/wav' -H 'origin: https://promptsaz.pages.dev' --data-binary @/tmp/silence.wav)
           echo "transcribe HTTP $vcode: $(head -c 400 /tmp/voice.json)"
           if [ "$vcode" != "200" ]; then echo "::error::Live /transcribe returned HTTP $vcode"; exit 1; fi
+          # Accounts server (Store Durable Object) answers
+          acode=$(curl -sS -o /tmp/acc.json -w '%{http_code}' -X POST "$URL/auth/lookup" \
+            -H 'content-type: application/json' -H 'origin: https://promptsaz.pages.dev' -d '{"email":"smoke-test@example.com"}')
+          echo "auth/lookup HTTP $acode: $(cat /tmp/acc.json)"
+          if [ "$acode" != "200" ]; then echo "::error::Live /auth/lookup returned HTTP $acode"; exit 1; fi
           # Quality sample: an informal Persian change request must come back restructured, not echoed.
           curl -sS -o /tmp/q.json -X POST "$URL/generate" \
             -H 'content-type: application/json' -H 'origin: https://promptsaz.pages.dev' \

@@ -1,18 +1,20 @@
 // Prompt Creator (پرامپت‌ساز) — single-page app shell, hash router and views. Layout follows a chat-app pattern:
 // a sidebar with recent prompts, a top bar, and a composer-first home page.
 
-import * as auth from './auth.js?v=202609251322';
-import * as prompts from './prompts.js?v=202609251322';
-import * as engine from './engine.js?v=202609251322';
-import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251322';
-import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251322';
-import * as voice from './voice.js?v=202609251322';
-import * as google from './google.js?v=202609251322';
-import * as updates from './updates.js?v=202609251322';
+import * as auth from './auth.js?v=202609251412';
+import * as prompts from './prompts.js?v=202609251412';
+import * as engine from './engine.js?v=202609251412';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251412';
+import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251412';
+import * as voice from './voice.js?v=202609251412';
+import * as google from './google.js?v=202609251412';
+import * as updates from './updates.js?v=202609251412';
+import * as sync from './sync.js?v=202609251412';
+import * as api from './api.js?v=202609251412';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download, logoMark, enableTooltips,
-} from './ui.js?v=202609251322';
+} from './ui.js?v=202609251412';
 
 const APP_NAME = 'پرامپت‌ساز';
 const view = $('#view');
@@ -111,6 +113,7 @@ const ROUTES = {
   '/help': { render: renderHelp, title: 'راهنما', auth: false },
   '/rules': { render: renderRules, title: 'قوانین', auth: false },
   '/app': { render: renderApp, title: 'دریافت اپ', auth: false },
+  '/admin': { render: renderAdmin, title: 'پنل مدیریت', auth: true, admin: true },
 };
 
 const AUTH_REASONS = {
@@ -136,7 +139,7 @@ async function route() {
   const user = auth.currentUser();
   let target = ROUTES[path] ? path : '/studio';
   const blocked = ROUTES[target].auth && !user;
-  if (blocked) target = '/studio';
+  if (blocked || (ROUTES[target].admin && user && !auth.isAdmin())) target = '/studio';
   if (target !== path) history.replaceState(null, '', `#${target}`);
   document.title = `${ROUTES[target].title} · ${APP_NAME}`;
   document.body.dataset.page = target.slice(1);
@@ -239,6 +242,7 @@ async function renderSidebar() {
     </div>
     <nav class="sb-nav sb-secondary" aria-label="راهنما">
       ${google.inAndroidApp() ? '' : `<a class="sb-item ${active === '/app' ? 'active' : ''}" href="#/app" data-tip="دریافت اپ">${icon('phone')}<span>دریافت اپ اندروید</span></a>`}
+      ${auth.isAdmin() ? `<a class="sb-item ${active === '/admin' ? 'active' : ''}" href="#/admin" data-tip="پنل مدیریت">${icon('shield')}<span>پنل مدیریت</span></a>` : ''}
       <a class="sb-item ${active === '/help' ? 'active' : ''}" href="#/help" data-tip="راهنما">${icon('help')}<span>راهنما</span></a>
       <a class="sb-item ${active === '/rules' ? 'active' : ''}" href="#/rules" data-tip="قوانین">${icon('shield')}<span>قوانین</span></a>
     </nav>
@@ -402,6 +406,7 @@ function openUserMenu(anchor) {
     <div class="user-menu-head"><span dir="ltr">${esc(user.email)}</span></div>
     <a role="menuitem" href="#/profile">${icon('user')}<span>حساب کاربری</span></a>
     <a role="menuitem" href="#/settings">${icon('settings')}<span>تنظیمات</span></a>
+    ${auth.isAdmin() ? `<a role="menuitem" href="#/admin">${icon('shield')}<span>پنل مدیریت</span></a>` : ''}
     ${google.inAndroidApp() ? '' : `<a role="menuitem" href="#/app">${icon('phone')}<span>دریافت اپ اندروید</span></a>`}
     <button role="menuitem" data-act="news">${icon('sparkles')}<span>تازه‌ها</span></button>
     <button role="menuitem" data-act="theme">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}<span>${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}</span></button>
@@ -519,7 +524,7 @@ function openAuthModal({ mode = 'login', reason = '' } = {}) {
           <p class="form-error" role="alert" hidden></p>
           <button class="btn btn-primary btn-block btn-lg btn-pill" type="submit">ادامه</button>
         </form>
-        <p class="auth-legal">با ادامه، <a href="terms.html" target="_blank" rel="noopener">شرایط استفاده</a> و <a href="privacy.html" target="_blank" rel="noopener">حریم خصوصی</a> را می‌پذیرید. حساب و پرامپت‌ها فقط در همین مرورگر ذخیره می‌شوند.</p>
+        <p class="auth-legal">با ادامه، <a href="terms.html" target="_blank" rel="noopener">شرایط استفاده</a> و <a href="privacy.html" target="_blank" rel="noopener">حریم خصوصی</a> را می‌پذیرید. حساب و پرامپت‌ها در حساب شما ذخیره می‌شوند و در سایت و اپ یکسان‌اند.</p>
       </div>`,
     onMount: (root, close) => {
       const form = $('#auth-form', root);
@@ -572,7 +577,10 @@ function openAuthModal({ mode = 'login', reason = '' } = {}) {
             if (account.exists && !account.hasPassword) throw new Error('این حساب با گوگل ساخته شده است؛ با دکمه «ادامه با گوگل» وارد شوید.');
             setStep(account.exists ? 'password' : 'register');
           } else if (step === 'password') {
-            done(await auth.login(payload), false);
+            const user = await auth.login(payload);
+            // An account from before the server was just created there: it has a new recovery code to show.
+            if (user.migrated) recoveryCode = { code: await auth.createRecoveryCode(), fresh: true };
+            done(user, false);
           } else if (step === 'register') {
             const user = await auth.register(payload);
             recoveryCode = { code: await auth.createRecoveryCode(), fresh: true };
@@ -596,7 +604,9 @@ function openAuthModal({ mode = 'login', reason = '' } = {}) {
         google.renderButton(slot, async (credential) => {
           try {
             const existed = Boolean(auth.currentUser());
-            const user = await auth.loginWithGoogle(google.parseCredential(credential), { remember: Boolean(input('remember').checked) });
+            google.parseCredential(credential); // quick local check (audience, expiry); the server verifies the signature
+            const user = await auth.loginWithGoogle(credential, { remember: Boolean(input('remember').checked) });
+            if (user.passwordRemoved) toast('برای امنیت حساب، رمز قبلی این ایمیل حذف شد. از «حساب کاربری» می‌توانید رمز جدید بگذارید.', 'info', 9000);
             done(user, !existed && Date.now() - user.createdAt < 5000);
           } catch (err) {
             showError(err.message);
@@ -1451,7 +1461,7 @@ async function renderProfile() {
     </section>` : ''}
     <section class="card danger-zone">
       <h2 class="card-title">${icon('trash')} حذف حساب</h2>
-      <p class="muted">حساب و همه پرامپت‌های آن برای همیشه از این مرورگر حذف می‌شود. پیش از آن از تنظیمات پشتیبان بگیرید.</p>
+      <p class="muted">حساب و همه پرامپت‌های آن برای همیشه از همه دستگاه‌ها و سرور حذف می‌شود. پیش از آن از تنظیمات پشتیبان بگیرید.</p>
       <button class="btn btn-danger btn-sm" id="delete-account">حذف حساب</button>
     </section>`;
   $('.profile-id h2').textContent = user.name;
@@ -1662,6 +1672,130 @@ function renderSettings() {
 
 // ---------- Help & rules ----------
 
+// ---------- Admin panel (only for the admin account; the server enforces it too) ----------
+
+async function renderAdmin() {
+  view.innerHTML = `
+    <header class="page-head">
+      <div><h1>پنل مدیریت</h1><p class="muted">آمار پرامپت‌ساز و مدیریت حساب‌ها. متن پرامپت‌های کاربران اینجا نمایش داده نمی‌شود.</p></div>
+      <button class="btn btn-soft" id="admin-refresh">${icon('refresh')} به‌روزرسانی</button>
+    </header>
+    <section class="admin-stats" id="admin-stats" aria-busy="true">${'<div class="stat-card skeleton"></div>'.repeat(4)}</section>
+    <section class="card admin-users">
+      <div class="admin-users-head">
+        <h2 class="card-title">${icon('user')} کاربران</h2>
+        <input type="search" id="admin-q" class="input" placeholder="جستجوی نام یا ایمیل" dir="auto" autocomplete="off">
+      </div>
+      <div id="admin-list" class="admin-list"></div>
+      <div class="form-actions start"><button class="btn btn-soft btn-sm" id="admin-more" hidden>نمایش بیشتر</button></div>
+    </section>`;
+
+  const stat = (label, value, sub = '') => `
+    <article class="stat-card"><span>${esc(label)}</span><strong>${num(value)}</strong>${sub ? `<small>${sub}</small>` : ''}</article>`;
+
+  async function loadStats() {
+    const box = $('#admin-stats');
+    try {
+      const s = await api.request('GET', '/admin/stats');
+      const q = s.quota;
+      const used = q ? Math.min(100, Math.round((q.usedToday / Math.max(1, q.limitToday)) * 100)) : 0;
+      box.innerHTML = `
+        ${stat('کاربران', s.users.total, `امروز +${num(s.users.today)} · ۷ روز +${num(s.users.week)}`)}
+        ${stat('کاربران فعال امروز', s.users.activeToday, `۷ روز گذشته: ${num(s.users.activeWeek)}`)}
+        ${stat('پرامپت‌ها', s.prompts.total, `امروز ${num(s.prompts.today)} · ۷ روز ${num(s.prompts.week)} · آرشیو ${num(s.prompts.archived)}`)}
+        ${stat('نوع ورود', s.users.google, `گوگل · ${num(s.users.password)} با رمز · ${num(s.users.blocked)} مسدود`)}
+        ${q ? `<article class="stat-card stat-wide"><span>مصرف سرویس رایگان امروز</span><strong>${num(q.usedToday)} <small>از ${num(q.limitToday)}</small></strong>
+          <div class="meter"><div class="meter-fill"></div></div>
+          <small>سقف هر کاربر در روز: ${num(q.perVisitor)} پرامپت · حداکثر ${num(q.perMinute)} درخواست در دقیقه</small></article>` : ''}`;
+      const fill = $('.meter-fill', box);
+      if (fill) {
+        fill.style.width = `${used}%`;
+        fill.classList.toggle('warn', used >= 80);
+      }
+    } catch (err) {
+      box.innerHTML = '<p class="muted"></p>';
+      $('p', box).textContent = err.message;
+    }
+    box.removeAttribute('aria-busy');
+  }
+
+  let offset = 0;
+  let query = '';
+  let token = 0;
+  async function loadUsers(append = false) {
+    const mine = ++token;
+    if (!append) offset = 0;
+    const list = $('#admin-list');
+    try {
+      const res = await api.request('GET', `/admin/users?q=${encodeURIComponent(query)}&offset=${offset}`);
+      if (mine !== token) return;
+      const rows = res.users.map((u) => `
+        <div class="admin-row ${u.blocked ? 'is-blocked' : ''}" data-id="${esc(u.id)}">
+          ${avatarHtml(u, 'sm')}
+          <div class="admin-who">
+            <strong dir="auto">${esc(u.name)}</strong>
+            <small dir="ltr">${esc(u.email)}</small>
+          </div>
+          <div class="admin-tags">
+            ${u.admin ? '<span class="tag tag-brand">مدیر</span>' : ''}
+            ${u.google ? '<span class="tag">گوگل</span>' : ''}
+            ${u.password ? '<span class="tag">رمز</span>' : ''}
+            ${u.blocked ? '<span class="tag tag-danger">مسدود</span>' : ''}
+          </div>
+          <div class="admin-meta">
+            <span>${num(u.prompts)} پرامپت</span>
+            <small>عضویت ${esc(formatDate(u.createdAt))}</small>
+            <small>${u.lastSeen ? `آخرین فعالیت ${esc(relativeTime(u.lastSeen))}` : 'بدون فعالیت'}</small>
+          </div>
+          <div class="admin-actions">
+            ${u.admin ? '' : `
+              <button class="btn btn-ghost btn-sm" data-act="${u.blocked ? 'unblock' : 'block'}">${u.blocked ? 'رفع مسدودی' : 'مسدود کردن'}</button>
+              <button class="icon-btn" data-act="delete" aria-label="حذف حساب" title="حذف حساب">${icon('trash')}</button>`}
+          </div>
+        </div>`).join('');
+      if (append) list.insertAdjacentHTML('beforeend', rows);
+      else list.innerHTML = rows || '<p class="muted">کاربری پیدا نشد.</p>';
+      paintAvatars(list);
+      $('#admin-more').hidden = !res.more;
+      offset += res.users.length;
+    } catch (err) {
+      list.innerHTML = '<p class="muted"></p>';
+      $('p', list).textContent = err.message;
+    }
+  }
+
+  $('#admin-refresh').addEventListener('click', () => { loadStats(); loadUsers(); });
+  $('#admin-more').addEventListener('click', () => loadUsers(true));
+  let debounce = null;
+  $('#admin-q').addEventListener('input', (e) => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => { query = e.target.value.trim(); loadUsers(); }, 300);
+  });
+  $('#admin-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-act]');
+    if (!btn) return;
+    const row = btn.closest('.admin-row');
+    const name = $('.admin-who strong', row).textContent;
+    const act = btn.dataset.act;
+    const questions = {
+      block: [`حساب «${name}» مسدود شود؟ کاربر از همه دستگاه‌ها خارج می‌شود و تا رفع مسدودی نمی‌تواند وارد شود.`, 'مسدود کردن'],
+      unblock: [`مسدودی حساب «${name}» برداشته شود؟`, 'رفع مسدودی'],
+      delete: [`حساب «${name}» و همه پرامپت‌هایش برای همیشه حذف شود؟ این کار قابل بازگشت نیست.`, 'حذف همیشگی'],
+    };
+    const [message, okLabel] = questions[act];
+    if (!(await confirmDialog(message, { title: 'مدیریت کاربر', okLabel, danger: act !== 'unblock' }))) return;
+    try {
+      await api.request('POST', '/admin/users/action', { id: row.dataset.id, action: act });
+      toast('انجام شد', 'success');
+      loadStats();
+      loadUsers();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+  await Promise.all([loadStats(), loadUsers()]);
+}
+
 function renderHelp() {
   const topics = [
     ['sparkles', 'پرامپت‌ساز چیست؟', 'ایده، درخواست یا یادداشت خامتان را به فارسی یا انگلیسی (حتی محاوره‌ای و نامرتب) بنویسید؛ پرامپت‌ساز آن را به یک پرامپت حرفه‌ای، ساختاریافته و دقیق برای ChatGPT، Claude، Gemini، ابزارهای ساخت تصویر و ویدیو یا دستیارهای برنامه‌نویسی تبدیل می‌کند؛ به فارسی، انگلیسی یا هر دو.'],
@@ -1673,7 +1807,7 @@ function renderHelp() {
     ['archive', 'آرشیو پیشرفته', 'پرامپت‌های مهم را با عنوان، پوشه، برچسب، یادداشت و علاقه‌مندی در آرشیو نگه دارید. در آرشیو بر اساس کلمه، پوشه، برچسب، نوع، زبان، بازه زمانی و علاقه‌مندی فیلتر و مرتب کنید، و متن پرامپت‌ها را ویرایش کنید.'],
     ['user', 'حساب کاربری و ورود', 'با گوگل یا با ایمیل و رمز وارد شوید. با «مرا به خاطر بسپار» بعد از بستن مرورگر هم وارد می‌مانید. بعد از ثبت‌نام یک کد بازیابی می‌گیرید؛ اگر رمز را فراموش کردید با «فراموشی رمز» و همین کد رمز جدید بگذارید. آواتار، نام، ایمیل و رمز را در «حساب کاربری» تغییر دهید.'],
     ['sun', 'تم روشن و تیره', 'با دکمه خورشید/ماه بالای صفحه یا از منوی حساب، تم را عوض کنید. در «تنظیمات» می‌توانید «مطابق سیستم» را هم انتخاب کنید.'],
-    ['download', 'داده‌ها و پشتیبان‌گیری', 'حساب و پرامپت‌ها فقط در همین مرورگر ذخیره می‌شوند. از «تنظیمات ← پشتیبان‌گیری» فایل پشتیبان بگیرید تا در مرورگر یا دستگاه دیگر بازگردانی کنید. پاک کردن داده‌های مرورگر یا حالت ناشناس، اطلاعات را از بین می‌برد.'],
+    ['download', 'همگام‌سازی و پشتیبان‌گیری', 'حساب و پرامپت‌ها در حساب شما روی سرور ذخیره می‌شوند؛ با همان ایمیل یا گوگل در سایت، اپ اندروید یا هر دستگاه دیگری وارد شوید تا همه پرامپت‌ها را ببینید. بدون اینترنت هم پرامپت‌های قبلی در دسترس‌اند و تغییرات بعداً همگام می‌شوند. از «تنظیمات ← پشتیبان‌گیری» هم می‌توانید فایل پشتیبان بگیرید. تنظیمات (مثل کلید API) فقط روی همان دستگاه می‌ماند.'],
     ['key', 'سهمیه رایگان و Claude', 'ساخت پرامپت رایگان است و هر کاربر سهمیه روزانه دارد که زیر کادر نوشتن نمایش داده می‌شود. اگر کلید API شخصی Claude دارید، در «تنظیمات» موتور «Claude با کلید شخصی» را انتخاب کنید تا بدون سقف روزانه کار کنید.'],
   ];
   view.innerHTML = `
@@ -1702,7 +1836,7 @@ function renderRules() {
     ['سقف استفاده رایگان', 'هر کاربر روزانه تعداد محدودی پرامپت رایگان دارد و کل سایت هم سقف روزانه دارد. تلاش برای دور زدن این محدودیت‌ها یا استفاده خودکار و انبوه مجاز نیست.'],
     ['مسئولیت نتیجه', 'پرامپت‌ها توسط هوش مصنوعی ساخته می‌شوند و ممکن است خطا داشته باشند. پیش از استفاده، نتیجه را بررسی کنید. مسئولیت استفاده از خروجی با کاربر است.'],
     ['مالکیت محتوا', 'متن‌ها و پرامپت‌هایی که می‌سازید متعلق به خودتان است.'],
-    ['حساب و داده‌ها', 'حساب کاربری و پرامپت‌ها فقط در مرورگر شما نگه داشته می‌شوند و مسئولیت نگهداری رمز، کد بازیابی و فایل پشتیبان با خود شماست.'],
+    ['حساب و داده‌ها', 'حساب کاربری و پرامپت‌ها برای همگام‌سازی بین دستگاه‌ها روی سرور پرامپت‌ساز نگه داشته می‌شوند. مسئولیت نگهداری رمز و کد بازیابی با خود شماست. مدیر سایت آمار کلی و فهرست حساب‌ها را می‌بیند، نه متن پرامپت‌ها.'],
   ];
   view.innerHTML = `
     <header class="page-head"><div><h1>قوانین استفاده</h1><p class="muted">با استفاده از پرامپت‌ساز این قوانین را می‌پذیرید.</p></div></header>
@@ -1787,6 +1921,22 @@ async function boot() {
   }
   $('#splash')?.classList.add('hide');
   route();
+  sync.start();
+  // Prompts pulled from other devices: refresh the sidebar, and list pages unless the user is typing there.
+  window.addEventListener('pc:synced', () => {
+    if (!auth.currentUser()) return;
+    fillRecent(auth.currentUser());
+    const { path } = parseHash();
+    const typing = document.activeElement?.matches?.('input, textarea, select');
+    if (['/history', '/archive'].includes(path) && !typing && !$('.modal-backdrop')) route();
+  });
+  // Profile changed on another device (name, avatar, admin): redraw the chrome.
+  window.addEventListener('pc:auth', () => { renderSidebar(); renderTopbar(); });
+  window.addEventListener('pc:session-ended', (e) => {
+    studio.result = null;
+    toast(e.detail?.message || 'از حساب خارج شدید. دوباره وارد شوید.', 'error', 7000);
+    route();
+  });
   // After the first render: in the app, offer a newer APK first; then show what changed since the last visit.
   setTimeout(async () => {
     if (google.inAndroidApp()) await updates.checkAppUpdate();

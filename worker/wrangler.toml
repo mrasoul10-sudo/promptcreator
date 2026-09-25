@@ -17,10 +17,22 @@ PER_MINUTE_LIMIT_GLOBAL = "8"
 DAILY_VOICE_LIMIT_PER_VISITOR = "40"
 # Secret (never in this file): GEMINI_API_KEY. Set as a GitHub Actions secret; the workflow uploads it.
 
+# Accounts: Google sign-ins must be for this web client ID; ADMIN_EMAIL gets the admin panel once signed in with Google.
+GOOGLE_CLIENT_ID = "737310583952-dn13t7a3tpp9of4dsn5ug7ed7mah9bsk.apps.googleusercontent.com"
+ADMIN_EMAIL = "m.rasoul10@gmail.com"
+
 [[durable_objects.bindings]]
 name = "QUOTA"
 class_name = "Quota"
 
+[[durable_objects.bindings]]
+name = "STORE"
+class_name = "Store"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Quota"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Store"]

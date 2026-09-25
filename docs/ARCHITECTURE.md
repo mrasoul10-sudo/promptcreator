@@ -2,7 +2,7 @@
 
 ## Overview
 
-Prompt Creator is a single-page application made of plain ES modules, served as static files from GitHub Pages. The browser stores all user data in IndexedDB. Prompts are generated either by the site's free service (a stateless Cloudflare Worker that calls Gemini with the site owner's key) or, if the user chooses, by Claude directly with the user's own key.
+Prompt Creator is a single-page application made of plain ES modules, served as static files (Cloudflare Pages and GitHub Pages). Accounts and prompts live on the account server (`worker/src/store.js`, a SQLite Durable Object in the same Cloudflare Worker); the browser keeps a cache in IndexedDB and `sync.js` keeps both in step, so the website, the Android app and every device show the same prompts. Prompts are generated either by the site's free service (a stateless Cloudflare Worker that calls Gemini with the site owner's key) or, if the user chooses, by Claude directly with the user's own key.
 
 ```
 ┌──────────────────────── Browser ─────────────────────────┐
@@ -81,7 +81,8 @@ History is every record. The archive is `archived === true`.
 
 ## Security model
 
-- **Scope:** accounts are local to one browser profile. The password protects a profile from casual use on a shared browser; it is not a server-side account. Anyone with access to the device's browser storage can read the data, including the API key.
+- **Accounts:** server-side. The password is stretched in the browser (PBKDF2-SHA256, 210k iterations, per-account random salt) and only that key is sent; the server stores SHA-256(server salt + key), limits failed attempts (10 per hour per email) and issues random bearer tokens (hashed at rest). Google ID tokens are verified server-side against Google's keys. A first Google sign-in on an existing password account removes the unverified password and its sessions. The admin is `ADMIN_EMAIL` with a linked Google account; the admin API never returns prompt text.
+- **Sync:** prompt records are opaque JSON per user; last write wins by `updatedAt`, deletions are tombstones, and clients pull by a per-user sequence cursor. Settings and the Claude API key are never uploaded.
 - **API key:** stored in IndexedDB and sent only to `api.anthropic.com` (enforced by CSP `connect-src`). The SDK is created with `dangerouslyAllowBrowser: true`, which is the intended mode for a bring-your-own-key client app.
 - **XSS:** CSP allows only same-origin scripts, no inline scripts or `eval`. All user and model content is escaped or set via `textContent`.
 - **Uploads:** avatars are decoded by the browser and re-encoded through a canvas, which discards any embedded payload and caps the size.
@@ -91,8 +92,8 @@ History is every record. The archive is `archived === true`.
 
 - **Email and password.** On sign-up the user gets a 12-character recovery code, shown once, with copy and download buttons. Only its PBKDF2 hash is stored. "Forgot password" takes the email, the code and a new password, then signs the user in and issues a new code (codes are single-use).
 - **Google.** Google Identity Services returns an ID token to the page. Without a backend its signature cannot be verified, so it is used only to identify the user for their local account: it is matched or linked by verified email, or a password-less account is created. A session opened with Google may set a new password without the old one, which is the recovery path for Google users.
-- **Persistence.** With "remember me" the session id is kept in `localStorage` and survives closing the browser and restarting the computer. Prompts are always saved in IndexedDB. Clearing site data or using a private window loses both, so export a backup.
+- **Persistence.** With "remember me" the session token is kept in `localStorage` (180-day session) and survives closing the browser; otherwise in `sessionStorage`. Prompts are saved locally first and uploaded by `sync.js`; clearing site data only removes the local copy.
 
 ## Why (almost) no backend
 
-The requirement was a URL that works in any browser, hosted from this GitHub repository. GitHub Pages serves static files only, so the design keeps accounts and data client-side. The one exception is the free prompt service, which must exist server-side because an API key can never be shipped to browsers; it is deliberately stateless. Moving to real server accounts later would mean replacing `db.js` and `auth.js` with API calls. The views and engine would not need to change.
+The requirement was a URL that works in any browser, hosted from this GitHub repository. The site stays static; the only server is the Cloudflare Worker, which hosts both the free prompt service (an API key can never be shipped to browsers) and, since the move to synced accounts, the account/sync server. `auth.js` kept its interface when it moved from local accounts to the server, so the views did not need to change.

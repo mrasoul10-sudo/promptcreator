@@ -19,17 +19,21 @@
       <p>حساب کاربری (نام، ایمیل، آواتار، رمز عبور به‌صورت هش‌شده)، تنظیمات، کلید API و همه پرامپت‌ها فقط در حافظه مرورگر خود شما (IndexedDB) ذخیره می‌شوند و برای ما یا هیچ سرور دیگری فرستاده نمی‌شوند.</p>
 
       <h2>ورود با گوگل</h2>
-      <p>اگر با گوگل وارد شوید، گوگل نام، ایمیل و تصویر پروفایل شما را به همین صفحه در مرورگرتان می‌دهد. این اطلاعات فقط برای ساخت حساب محلی در همان مرورگر استفاده می‌شود و جای دیگری ذخیره یا ارسال نمی‌شود. فقط دسترسی‌های پایه (openid، email، profile) درخواست می‌شود.</p>
+      <p>اگر با گوگل وارد شوید، گوگل نام، ایمیل و تصویر پروفایل شما را می‌دهد و سرور پرامپت‌ساز امضای آن را بررسی می‌کند. این اطلاعات فقط برای ساخت و ورود به حساب شما استفاده می‌شود. فقط دسترسی‌های پایه (openid، email، profile) درخواست می‌شود.</p>
+
+      <h2>حساب و همگام‌سازی</h2>
+      <p>برای اینکه پرامپت‌هایتان در سایت، اپ اندروید و هر دستگاهی یکسان باشند، حساب (نام، ایمیل، تصویر پروفایل) و پرامپت‌های شما (تاریخچه، آرشیو، پوشه‌ها، برچسب‌ها و یادداشت‌ها) روی سرور پرامپت‌ساز در Cloudflare ذخیره می‌شوند. رمز عبور هرگز به سرور فرستاده نمی‌شود؛ مرورگر آن را با PBKDF2 تبدیل می‌کند و سرور فقط هش آن را نگه می‌دارد. تنظیمات و کلید API شخصی Claude فقط روی همان دستگاه می‌ماند و به سرور ما فرستاده نمی‌شود.</p>
+      <p>مدیر سایت آمار کلی (تعداد کاربران و پرامپت‌ها) و فهرست حساب‌ها (نام، ایمیل، تعداد پرامپت و زمان آخرین فعالیت) را می‌بیند و می‌تواند حساب‌های ناقض قوانین را مسدود یا حذف کند؛ متن پرامپت‌های شما در پنل مدیریت نمایش داده نمی‌شود.</p>
 
       <h2>ساخت پرامپت</h2>
       <p>در حالت پیش‌فرض (رایگان)، متنی که برای ساخت پرامپت می‌فرستید از طریق سرور واسط ما روی Cloudflare به سرویس Gemini گوگل فرستاده می‌شود و پرامپت ساخته‌شده برگردانده می‌شود. اگر با میکروفون صحبت کنید، صدای ضبط‌شده هم به همین شکل برای تبدیل به متن به Gemini فرستاده می‌شود. سرور واسط هیچ متن یا صدایی را ذخیره نمی‌کند؛ فقط برای اعمال سقف روزانه، شمارنده‌ای با شناسه هش‌شده (نه خود IP) نگه می‌دارد. پردازش در Gemini تابع <a href="https://ai.google.dev/gemini-api/terms" rel="noopener" target="_blank">شرایط Gemini API</a> است و در سطح رایگان ممکن است گوگل از این متن‌ها برای بهبود مدل‌هایش استفاده کند؛ اطلاعات محرمانه وارد نکنید.</p>
       <p>اگر در تنظیمات «Claude با کلید شخصی» را انتخاب کنید، متن مستقیماً از مرورگر شما به Anthropic (api.anthropic.com) فرستاده می‌شود و تابع <a href="https://www.anthropic.com/legal/privacy" rel="noopener" target="_blank">سیاست حریم خصوصی Anthropic</a> است.</p>
 
       <h2>حذف اطلاعات</h2>
-      <p>از صفحه «حساب کاربری» با «حذف حساب» می‌توانید همه اطلاعات را پاک کنید. پاک کردن داده‌های سایت در مرورگر هم همه چیز را حذف می‌کند.</p>
+      <p>از صفحه «حساب کاربری» با «حذف حساب» می‌توانید حساب و همه پرامپت‌ها را برای همیشه از سرور و دستگاه‌هایتان پاک کنید. حذف هر پرامپت هم روی همه دستگاه‌ها اعمال می‌شود.</p>
 
       <h2>English summary</h2>
-      <p dir="ltr">Prompt Creator stores your account, settings, API key and prompts only in your own browser. Google Sign-In (openid, email, profile) is used only to create a local account in your browser. By default, prompt text (and, if you use the microphone, the voice recording, for transcription) is sent through our stateless Cloudflare proxy to Google's Gemini API (free tier; Google may use it to improve its models, so do not enter confidential data). The proxy stores no text or audio, only a daily counter keyed by a hashed visitor id. If you choose Claude with your own key, text goes directly from your browser to Anthropic. Delete your account in the app, or clear site data, to remove everything.</p>
+      <p dir="ltr">Prompt Creator stores your account (name, email, avatar) and your prompts on its server on Cloudflare so they sync between the website, the Android app and your devices. Passwords are stretched with PBKDF2 in your browser and only a hash is stored. Settings and your personal Claude API key stay on your device. Google Sign-In (openid, email, profile) is verified by the server and used only for your account. The site admin sees totals and the account list (name, email, prompt count, last activity), never prompt text. By default, prompt text (and, if you use the microphone, the voice recording, for transcription) is sent through our stateless Cloudflare proxy to Google's Gemini API (free tier; Google may use it to improve its models, so do not enter confidential data). The proxy stores no text or audio, only a daily counter keyed by a hashed visitor id. If you choose Claude with your own key, text goes directly from your browser to Anthropic. Delete your account in the app to remove it and all prompts from the server and your devices.</p>
 
       <p><a class="btn btn-primary" href="./">بازگشت به پرامپت‌ساز</a></p>
     </article>

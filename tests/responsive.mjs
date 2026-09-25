@@ -2,19 +2,43 @@
 // no horizontal overflow, the empty studio must fit vertically, and rail tooltips must stay fully on screen.
 // Usage: serve the repo on :8765, then node tests/responsive.mjs
 import { chromium } from 'playwright';
+import worker, { Store } from '../worker/src/index.js';
+import { fakeSqlNamespace, GOOGLE_JWKS, googleIdToken } from './fake-cloudflare.mjs';
+
+// Accounts run on the real worker code in this process (SQLite in memory); the signed-in user is the admin,
+// so the admin panel is checked too.
+const API = 'https://promptcreator-api.test.workers.dev';
+const CLIENT = 'test-client.apps.googleusercontent.com';
+const env = { ALLOWED_ORIGINS: 'http://localhost:8765', GOOGLE_CLIENT_ID: CLIENT, ADMIN_EMAIL: 'admin@example.com' };
+env.STORE = fakeSqlNamespace(Store, env);
+const nodeFetch = globalThis.fetch;
+globalThis.fetch = (url, init) => (String(url) === 'https://www.googleapis.com/oauth2/v3/certs' ? Promise.resolve(Response.json(GOOGLE_JWKS)) : nodeFetch(url, init));
+const token = googleIdToken({ aud: CLIENT, sub: 'g-admin', email: 'admin@example.com', name: 'محمد رسول مرادی نژاد' });
+
 const b = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] });
 const sizes = [[1912,843],[1920,1080],[1366,768],[1280,720],[1024,768],[900,700],[768,1024],[600,900],[414,896],[390,844],[360,640],[320,568]];
-const pages = ['#/studio','#/help','#/rules','#/app','#/history','#/archive','#/settings','#/profile'];
+const pages = ['#/studio','#/help','#/rules','#/app','#/history','#/archive','#/settings','#/profile','#/admin'];
 const report = [];
 const ctx = await b.newContext();
-await ctx.route(/assets\/js\/config\.js/, r => r.fulfill({ contentType:'text/javascript', body:"export const GOOGLE_CLIENT_ID='';export const FREE_API_URL='';export const ANDROID_APK_URL='x';export const ANDROID_RELEASES_URL='y';" }));
+await ctx.route(/assets\/js\/config\.js/, r => r.fulfill({ contentType:'text/javascript', body:`export const GOOGLE_CLIENT_ID='${CLIENT}';export const FREE_API_URL='${API}';export const ANDROID_APK_URL='x';export const ANDROID_RELEASES_URL='y';` }));
+await ctx.route(`${API}/**`, async (route) => {
+  const req = route.request();
+  if (!/\/(auth|me|sync|admin)/.test(new URL(req.url()).pathname)) return route.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{"remaining":20,"limit":20}' });
+  const body = ['GET', 'OPTIONS'].includes(req.method()) ? undefined : req.postDataBuffer();
+  const res = await worker.fetch(new Request(req.url(), { method: req.method(), headers: req.headers(), body }), env);
+  return route.fulfill({ status: res.status, headers: Object.fromEntries(res.headers), body: Buffer.from(await res.arrayBuffer()) });
+});
+await ctx.route('https://accounts.google.com/gsi/client', (r) => r.fulfill({ contentType: 'text/javascript', body: `window.google = { accounts: { id: {
+  initialize(c) { this.cb = c.callback; },
+  renderButton(el) { const x = document.createElement('button'); x.type = 'button'; x.id = 'gsi-stub'; x.textContent = 'Google'; x.onclick = () => this.cb({ credential: ${JSON.stringify(token)} }); el.appendChild(x); const f = document.createElement('iframe'); f.src = 'about:blank'; f.style.display = 'none'; el.appendChild(f); },
+} } };` }));
 const p = await ctx.newPage();
 await p.goto('http://localhost:8765/'); await p.waitForSelector('#composer');
-// sign up so protected pages render
+// sign in (admin, with Google) so protected pages render
 await p.click('.topbar [data-login="login"]');
-await p.fill('#auth-form input[name=email]','a@b.co'); await p.click('#auth-form button[type=submit]');
-await p.fill('#auth-form input[name=name]','محمد رسول مرادی نژاد'); await p.fill('#auth-form input[name=password]','secret123'); await p.click('#auth-form button[type=submit]');
-await p.waitForSelector('.recovery-code'); await p.click('.modal-foot button'); await p.waitForSelector('.modal-backdrop',{state:'detached'});
+await p.click('#gsi-stub');
+await p.waitForSelector('.modal-backdrop',{state:'detached'});
+await p.waitForSelector('#user-menu-btn');
 const measure = () => p.evaluate(() => {
   const d = document.documentElement;
   const ox = d.scrollWidth - innerWidth, oy = d.scrollHeight - innerHeight;
