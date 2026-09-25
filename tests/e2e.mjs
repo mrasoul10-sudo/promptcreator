@@ -210,7 +210,10 @@ assert.equal(await page.textContent('#auth-email-text'), 'test@example.com');
 await page.fill('#auth-form input[name=name]', 'رسول تست');
 await page.fill('#auth-form input[name=password]', 'secret123');
 await page.click('#auth-form button[type=submit]');
-await page.waitForSelector('.recovery-code');
+await page.waitForSelector('.recovery-code').catch(async (e) => {
+  console.log('DEBUG modal:', await page.evaluate(() => [...document.querySelectorAll('.modal')].map((m) => m.innerText.slice(0, 300))), 'hash:', await page.evaluate(() => location.hash), errors);
+  throw e;
+});
 const recoveryCode = (await page.textContent('.recovery-code')).trim();
 assert.match(recoveryCode, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
 await page.click('.modal-foot button:has-text("ذخیره کردم")');
@@ -542,7 +545,11 @@ await newApp.addInitScript((token) => {
   window.Capacitor = { Plugins: {
     SocialLogin: {
       initialize: async () => ({}),
-      login: async () => ({ provider: 'google', result: { idToken: token } }),
+      // Like the real plugin: explicit scopes are rejected unless MainActivity is modified.
+      login: async (req) => {
+        if (req?.options?.scopes) throw new Error('You CANNOT use scopes without modifying the main activity. Please follow the docs!');
+        return { provider: 'google', result: { idToken: token } };
+      },
     },
   } };
 }, idToken);

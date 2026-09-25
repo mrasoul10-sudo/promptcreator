@@ -8,8 +8,8 @@
 // Reading aloud: speechSynthesis in browsers; in the Android app, whose WebView lacks it, the native
 // text-to-speech plugin (@capacitor-community/text-to-speech via window.Capacitor.Plugins).
 
-import { transcribe, freeServiceReady } from './engine.js?v=202609251442';
-import { MAX_AUDIO_SECONDS } from './prompt-spec.js?v=202609251442';
+import { transcribe, freeServiceReady } from './engine.js?v=202609251510';
+import { MAX_AUDIO_SECONDS } from './prompt-spec.js?v=202609251510';
 
 const nativeTts = () => (/PromptSazApp/.test(navigator.userAgent) ? window.Capacitor?.Plugins?.TextToSpeech || null : null);
 const AudioCtx = window.AudioContext || window.webkitAudioContext;

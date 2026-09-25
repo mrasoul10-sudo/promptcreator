@@ -64,7 +64,32 @@ jobs:
           grep asset_statements android/app/src/main/res/values/strings.xml android/app/src/main/AndroidManifest.xml
 
       - name: Generate launcher icons and splash screens
-        run: npx @capacitor/assets generate --android --iconBackgroundColor '#6C4CF5' --iconBackgroundColorDark '#6C4CF5' --splashBackgroundColor '#ffffff' --splashBackgroundColorDark '#212121'
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#060B14' --iconBackgroundColorDark '#060B14' --splashBackgroundColor '#ffffff' --splashBackgroundColorDark '#212121'
+
+      - name: Launch screen (the logo, centered)
+        # The template draws a full-screen splash image as the window background, which Android stretches to the
+        # screen shape. Use the platform launch screen instead: the logo (assets/splash-logo.png) at its natural
+        # size on a plain background, light or dark with the phone.
+        run: |
+          RES=android/app/src/main/res
+          mkdir -p $RES/drawable-xxxhdpi $RES/values-night
+          cp assets/splash-logo.png $RES/drawable-xxxhdpi/splash_logo.png
+          printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="launch_background">#FFFFFF</color>\n</resources>\n' > $RES/values/launch_colors.xml
+          printf '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="launch_background">#212121</color>\n</resources>\n' > $RES/values-night/launch_colors.xml
+          node -e '
+            const fs = require("fs");
+            const f = "android/app/src/main/res/values/styles.xml";
+            const s = fs.readFileSync(f, "utf8");
+            const launch = `<style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+                  <item name="windowSplashScreenBackground">@color/launch_background</item>
+                  <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+                  <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+              </style>`;
+            const out = s.replace(/<style name="AppTheme.NoActionBarLaunch"[\s\S]*?<\/style>/, launch);
+            if (out === s) { console.error("launch theme not found"); process.exit(1); }
+            fs.writeFileSync(f, out);
+          '
+          cat $RES/values/styles.xml
 
       - name: Stamp the version into the user agent
         # The site reads "PromptSazApp/<versionCode>" to tell the installed version and offer updates.

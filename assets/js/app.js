@@ -1,20 +1,20 @@
 // Prompt Creator (پرامپت‌ساز) — single-page app shell, hash router and views. Layout follows a chat-app pattern:
 // a sidebar with recent prompts, a top bar, and a composer-first home page.
 
-import * as auth from './auth.js?v=202609251442';
-import * as prompts from './prompts.js?v=202609251442';
-import * as engine from './engine.js?v=202609251442';
-import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251442';
-import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251442';
-import * as voice from './voice.js?v=202609251442';
-import * as google from './google.js?v=202609251442';
-import * as updates from './updates.js?v=202609251442';
-import * as sync from './sync.js?v=202609251442';
-import * as api from './api.js?v=202609251442';
+import * as auth from './auth.js?v=202609251510';
+import * as prompts from './prompts.js?v=202609251510';
+import * as engine from './engine.js?v=202609251510';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251510';
+import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251510';
+import * as voice from './voice.js?v=202609251510';
+import * as google from './google.js?v=202609251510';
+import * as updates from './updates.js?v=202609251510';
+import * as sync from './sync.js?v=202609251510';
+import * as api from './api.js?v=202609251510';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download, logoMark, enableTooltips,
-} from './ui.js?v=202609251442';
+} from './ui.js?v=202609251510';
 
 const APP_NAME = 'پرامپت‌ساز';
 const view = $('#view');
@@ -446,7 +446,7 @@ function renderTopbar() {
       ${user ? '' : `
         <button class="btn btn-primary btn-pill btn-sm" data-login="login">ورود</button>
         <button class="btn btn-outline btn-pill btn-sm tb-signup" data-login="register">ثبت‌نام رایگان</button>`}
-      ${google.inAndroidApp() ? '' : `<a class="icon-btn tb-app" href="#/app" aria-label="دریافت اپ اندروید" title="دریافت اپ اندروید">${icon('phone')}</a>`}
+      ${google.inAndroidApp() ? '' : `<a class="tb-app" href="#/app" aria-label="دریافت اپ اندروید" data-tip="نصب اپ پرامپت‌ساز روی گوشی اندروید">${icon('phone')}<span>اپ اندروید</span></a>`}
       <button class="icon-btn tb-theme" aria-label="تغییر تم روشن و تیره" title="${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}</button>
       <button class="icon-btn tb-new" aria-label="پرامپت جدید" title="پرامپت جدید">${icon('edit')}</button>
     </div>`;
@@ -560,7 +560,13 @@ function openAuthModal({ mode = 'login', reason = '' } = {}) {
         title.textContent = { email: 'ورود یا ثبت‌نام', password: 'رمز عبور را وارد کنید', register: 'ساخت حساب رایگان', forgot: 'بازیابی رمز عبور' }[next];
         errorBox.hidden = true;
         const focus = { email: 'email', password: 'password', register: 'name', forgot: 'code' }[next];
-        setTimeout(() => input(focus)?.focus(), 30);
+        // Focus the step's first field after it shows, unless the user has already moved into another field
+        // (a late focus() would send their typing to the wrong input).
+        setTimeout(() => {
+          const active = document.activeElement;
+          if (active?.matches?.('#auth-form input:not([type=checkbox])') && active !== input(focus)) return;
+          input(focus)?.focus();
+        }, 30);
       };
       setStep('email');
       $('#auth-edit-email', form).addEventListener('click', () => setStep('email'));
@@ -1915,8 +1921,9 @@ function setupAndroidBack() {
 async function boot() {
   setupAndroidBack();
   // Rail labels: only when the desktop sidebar is collapsed to icons.
-  enableTooltips((el) => el.closest('.sidebar') && document.body.classList.contains('sidebar-closed') && !mobileQuery.matches
-    && el.getAttribute('aria-expanded') !== 'true');
+  // Tooltips: top-bar buttons, and the sidebar only when it is collapsed to icons (its labels are hidden).
+  enableTooltips((el) => el.getAttribute('aria-expanded') !== 'true' && !mobileQuery.matches
+    && (el.closest('.topbar') || (el.closest('.sidebar') && document.body.classList.contains('sidebar-closed'))));
   try {
     await auth.restore();
   } catch (err) {

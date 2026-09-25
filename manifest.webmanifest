@@ -8,7 +8,7 @@
   "scope": "./",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#6C4CF5",
+  "theme_color": "#0A8FD4",
   "prefer_related_applications": false,
   "related_applications": [
     { "platform": "play", "id": "io.github.mrasoul10sudo.promptsaz" }

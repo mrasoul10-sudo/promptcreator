@@ -23,9 +23,11 @@
   --text-3: #8f8f8f;
   --primary: #0d0d0d;
   --on-primary: #ffffff;
-  --brand: #6c4cf5;
-  --accent: #6c4cf5;
-  --accent-soft: rgba(108, 76, 245, 0.1);
+  --brand: #0a8fd4;
+  --accent: #0a8fd4;
+  --accent-soft: rgba(10, 143, 212, 0.1);
+  --logo-ring: #0bbef2;
+  --logo-band: #0a72b5;
   --danger: #e02e2a;
   --danger-soft: rgba(224, 46, 42, 0.1);
   --success: #16a34a;
@@ -64,8 +66,9 @@
     --text-3: #8e8e8e;
     --primary: #ffffff;
     --on-primary: #0d0d0d;
-    --accent: #9d86ff;
-    --accent-soft: rgba(157, 134, 255, 0.16);
+    --accent: #38c6f4;
+    --accent-soft: rgba(56, 198, 244, 0.16);
+    --logo-band: #1a8ad0;
     --danger-soft: rgba(224, 46, 42, 0.18);
     --mark: rgba(232, 163, 23, 0.35);
     --bubble: #303030;
@@ -90,8 +93,9 @@
   --text-3: #8e8e8e;
   --primary: #ffffff;
   --on-primary: #0d0d0d;
-  --accent: #9d86ff;
-  --accent-soft: rgba(157, 134, 255, 0.16);
+  --accent: #38c6f4;
+  --accent-soft: rgba(56, 198, 244, 0.16);
+  --logo-band: #1a8ad0;
   --danger-soft: rgba(224, 46, 42, 0.18);
   --mark: rgba(232, 163, 23, 0.35);
   --bubble: #303030;
@@ -187,8 +191,8 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2
 .brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; font-weight: 800; font-size: 1.05rem; }
 .brand:hover { background: var(--hover); }
 .logo-mark { display: block; flex: none; }
-.logo-mark .logo-bubble, .logo-mark .logo-eye { fill: var(--brand); }
-.logo-mark .logo-head { fill: #fff; }
+.logo-mark .logo-ring { stroke: var(--logo-ring); }
+.logo-mark .logo-band, .logo-mark .logo-thin { stroke: var(--logo-band); }
 .brand-mark { width: 34px; height: 34px; }
 .sb-toggle .toggle-logo { display: none; }
 
@@ -288,6 +292,11 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2
   background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px);
 }
 .tb-start, .tb-end { display: flex; align-items: center; gap: 6px; }
+/* «اپ اندروید»: icon + label pill; icon only on narrow screens. */
+.tb-app { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); color: var(--text); font-size: 0.85rem; font-weight: 600; white-space: nowrap; transition: background-color 0.15s, border-color 0.15s; }
+.tb-app:hover { background: var(--hover); border-color: var(--border-strong); }
+.tb-app .icon { width: 18px; height: 18px; color: var(--brand); }
+@media (max-width: 600px) { .tb-app { width: 36px; padding: 0; justify-content: center; } .tb-app span { display: none; } }
 .tb-title { padding: 6px 10px; border-radius: 10px; font-weight: 700; font-size: 1.05rem; }
 .tb-title:hover { background: var(--hover); }
 .topbar .tb-menu, .topbar .tb-new { display: none; }
@@ -493,7 +502,7 @@ input[type="date"] { direction: ltr; text-align: end; }
 .check .icon { width: 16px; height: 16px; color: var(--star); }
 .input-group { display: flex; gap: 8px; }
 .input-group input { flex: 1; }
-.form-error { padding: 10px 14px; border-radius: 12px; background: var(--danger-soft); color: var(--danger); font-size: 0.88rem; margin-bottom: 12px; }
+.form-error { padding: 10px 14px; border-radius: 12px; background: var(--danger-soft); color: var(--danger); font-size: 0.88rem; margin-bottom: 12px; white-space: pre-line; overflow-wrap: anywhere; }
 .form-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 4px; }
 .form-actions.start { justify-content: flex-start; }
 .form-grid { display: flex; flex-direction: column; }
@@ -632,7 +641,7 @@ button.chip:hover { border-color: var(--border-strong); color: var(--text); }
 .app-banner-logo { width: 36px; height: 36px; }
 .app-page { max-width: 880px; margin: 0 auto; width: 100%; }
 .app-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 24px 0 26px; }
-.app-hero-logo { width: 84px; height: 84px; filter: drop-shadow(0 12px 28px rgba(108, 76, 245, 0.35)); animation: pop-in 0.5s var(--ease) both; }
+.app-hero-logo { width: 84px; height: 84px; filter: drop-shadow(0 10px 26px rgba(11, 190, 242, 0.35)); animation: pop-in 0.5s var(--ease) both; }
 .app-hero h1 { margin-top: 10px; font-size: clamp(1.4rem, 3vw, 1.9rem); }
 .app-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .app-card { display: flex; flex-direction: column; gap: 12px; margin: 0; }

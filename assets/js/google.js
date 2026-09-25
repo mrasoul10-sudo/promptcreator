@@ -1,7 +1,7 @@
 // "Sign in with Google" via Google Identity Services (client-side only; no backend).
 
-import { GOOGLE_CLIENT_ID } from './config.js?v=202609251442';
-import { icon } from './ui.js?v=202609251442';
+import { GOOGLE_CLIENT_ID } from './config.js?v=202609251510';
+import { icon } from './ui.js?v=202609251510';
 
 const GSI_SRC = 'https://accounts.google.com/gsi/client';
 
@@ -38,7 +38,9 @@ async function nativeSignIn() {
     nativeReady = null;
     throw err;
   }
-  const res = await plugin.login({ provider: 'google', options: { scopes: ['email', 'profile'] } });
+  // No `scopes`: the plugin always requests openid, email and profile, and rejects any explicit scopes unless the
+  // app's MainActivity is modified ("You CANNOT use scopes without modifying the main activity").
+  const res = await plugin.login({ provider: 'google', options: {} });
   const token = res?.result?.idToken;
   if (!token) throw new Error('گوگل اطلاعات ورود را برنگرداند. دوباره تلاش کنید.');
   return token;
@@ -60,9 +62,13 @@ function renderNativeButton(container, callback, onError) {
       const text = String(err?.code || err?.message || '');
       if (/cancel/i.test(text)) return; // the user closed Google's account sheet
       console.error(err);
-      onError?.(new Error(/28444|developer console|10:/i.test(text)
-        ? 'ورود با گوگل در اپ هنوز راه‌اندازی نشده است. فعلاً با ایمیل وارد شوید.'
-        : 'ورود با گوگل انجام نشد. مطمئن شوید یک حساب گوگل روی گوشی فعال است و دوباره تلاش کنید.'));
+      // The plugin's own (English) reason is appended so a failure can be diagnosed from a screenshot.
+      const detail = String(err?.message || err?.code || '').slice(0, 160);
+      onError?.(new Error(`${/28444|developer console|not configured|10:/i.test(text)
+        ? 'ورود با گوگل در اپ هنوز راه‌اندازی نشده است (تنظیمات Google Cloud). فعلاً با ایمیل وارد شوید.'
+        : /no credential|no google account/i.test(text)
+          ? 'حساب گوگلی روی این گوشی پیدا نشد. از تنظیمات گوشی یک حساب گوگل اضافه کنید.'
+          : 'ورود با گوگل انجام نشد. اینترنت را بررسی کنید و دوباره تلاش کنید.'}${detail ? `\n(${detail})` : ''}`));
     } finally {
       button.disabled = false;
     }
