@@ -129,6 +129,7 @@ const call = async (...args) => {
   const { res, body } = await call('/generate', { ip: '9.9.9.9', body: { source: 'x' } });
   assert.equal(res.status, 502);
   assert.equal(body.error, 'upstream_error');
+  assert.equal(body.detail, 'boom', 'upstream error text is exposed for diagnosis');
   const after = (await call('/quota', { method: 'GET', ip: '9.9.9.9' })).body.remaining;
   assert.equal(after, before, 'failed call does not use quota');
   geminiMode = 'ok';

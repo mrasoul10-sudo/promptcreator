@@ -175,14 +175,16 @@ async function handleGenerate(request, env, origin) {
       return json({ ...out, remaining: quota.remaining }, 200, origin);
     } catch (err) {
       lastError = err;
-      // Only a busy or missing model is worth retrying on the fallback model.
-      if (!(err instanceof UpstreamError) || !['upstream_busy', 'model_not_found'].includes(err.code)) break;
+      // Only a busy, missing or temporarily failing model is worth retrying on the fallback model.
+      if (!(err instanceof UpstreamError) || !['upstream_busy', 'model_not_found', 'upstream_error'].includes(err.code)) break;
     }
   }
   await quotaCall(env, 'refund', { visitor, day: today() });
   const code = lastError instanceof UpstreamError ? lastError.code : 'upstream_error';
   console.error('generate failed', code, lastError?.message);
-  return fail(lastError?.status || 502, code, USER_MESSAGES[code] || USER_MESSAGES.upstream_error, origin);
+  // `detail` carries Gemini's own error text (never the key) so the site owner can diagnose failures.
+  const detail = String(lastError?.message || '').replace(/key=[^&\s]+/gi, 'key=***').slice(0, 300);
+  return fail(lastError?.status || 502, code, USER_MESSAGES[code] || USER_MESSAGES.upstream_error, origin, { detail });
 }
 
 async function handleQuota(request, env, origin) {
