@@ -118,4 +118,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add assets/android-version.json
           git commit -m "Android app version ${{ github.run_number }}"
-          for i in 1 2 3; do git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && break; sleep 5; done
+          # The build leaves generated changes in app-android/; set them aside so the rebase can run.
+          git stash --include-untracked --quiet || true
+          for i in 1 2 3; do
+            if git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}"; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::Could not push assets/android-version.json"; exit 1
