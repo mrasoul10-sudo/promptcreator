@@ -526,6 +526,22 @@ button.chip:hover { border-color: var(--border-strong); color: var(--text); }
 #engine-choice { margin-bottom: 12px; }
 .engine-note { margin-bottom: 8px; }
 
+/* ---------- Help & rules ---------- */
+
+.sb-secondary { padding-top: 6px; border-top: 1px solid var(--border); }
+.help-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.help-card { padding: 18px; border-radius: var(--radius-lg); border: 1px solid var(--border); background: var(--surface); animation: view-in 0.3s var(--ease) both; }
+.help-card h2 { font-size: 1rem; margin: 10px 0 4px; }
+.help-card p { color: var(--text-2); font-size: 0.9rem; }
+.help-icon { display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); }
+.help-cta { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.rules-list { margin: 0 0 16px; padding: 0; list-style: none; counter-reset: rule; display: flex; flex-direction: column; gap: 10px; }
+.rules-list li { position: relative; padding: 16px 18px 16px 18px; padding-inline-start: 58px; border-radius: var(--radius-lg); border: 1px solid var(--border); background: var(--surface); counter-increment: rule; }
+.rules-list li::before { content: counter(rule, persian); position: absolute; inset-inline-start: 18px; top: 16px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--primary); color: var(--on-primary); font-weight: 700; font-size: 0.85rem; }
+.rules-list h2 { font-size: 1rem; margin-bottom: 2px; }
+.rules-list p { color: var(--text-2); font-size: 0.9rem; }
+.rules-links a { color: var(--accent); }
+
 /* ---------- Modal ---------- */
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, 0.5); opacity: 0; transition: opacity 0.2s var(--ease); }
@@ -549,8 +565,13 @@ button.chip:hover { border-color: var(--border-strong); color: var(--text); }
 .modal-auth .modal-body { padding: 8px 24px 24px; }
 .auth-dialog { display: flex; flex-direction: column; }
 .auth-sub { text-align: center; color: var(--text-2); font-size: 0.92rem; margin-bottom: 22px; }
-.google-slot { display: flex; justify-content: center; min-height: 44px; }
+.google-slot { position: relative; display: flex; justify-content: center; height: 44px; overflow: hidden; border-radius: 999px; }
 .google-slot > div { width: 100%; }
+/* Until Google's own stylesheet arrives, its placeholder renders an unsized logo; keep it tiny and hidden. */
+.google-slot svg { width: 18px !important; height: 18px !important; }
+.google-slot:not(.ready) > :not(.google-skeleton) { visibility: hidden; }
+.google-slot:not(.ready) .google-skeleton { position: absolute; inset: 0; }
+.google-slot.ready .google-skeleton { display: none; }
 .google-skeleton { width: 100%; height: 44px; border-radius: 99px; }
 .divider { display: flex; align-items: center; gap: 12px; margin: 16px 0; color: var(--text-3); font-size: 0.8rem; font-weight: 600; }
 .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
@@ -601,6 +622,8 @@ button.chip:hover { border-color: var(--border-strong); color: var(--text); }
   .studio.is-empty { padding-bottom: 4vh; }
   .suggestions { grid-template-columns: 1fr; }
   .suggestion:nth-child(n+3) { display: none; }
+  .help-grid { grid-template-columns: 1fr; }
+  .tb-theme { display: none; }
   .msg-user .bubble { max-width: 90%; }
   .bot-avatar { display: none; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }

@@ -1,6 +1,6 @@
 // "Sign in with Google" via Google Identity Services (client-side only; no backend).
 
-import { GOOGLE_CLIENT_ID } from './config.js?v=202609251117';
+import { GOOGLE_CLIENT_ID } from './config.js?v=202609251128';
 
 const GSI_SRC = 'https://accounts.google.com/gsi/client';
 
@@ -48,8 +48,23 @@ export async function renderButton(container, callback, { theme = 'light' } = {}
     });
     initialized = true;
   }
-  container.innerHTML = '';
-  window.google.accounts.id.renderButton(container, {
+  // Render into a host next to the skeleton; reveal only once Google's iframe has loaded, so its unstyled
+  // placeholder (an oversized logo) never flashes on screen.
+  container.classList.remove('ready');
+  container.querySelector('.gsi-host')?.remove();
+  const host = document.createElement('div');
+  host.className = 'gsi-host';
+  container.appendChild(host);
+  const reveal = () => container.classList.add('ready');
+  const watch = new MutationObserver(() => {
+    const frame = host.querySelector('iframe');
+    if (!frame) return;
+    watch.disconnect();
+    frame.addEventListener('load', () => setTimeout(reveal, 60), { once: true });
+  });
+  watch.observe(host, { childList: true, subtree: true });
+  setTimeout(() => { watch.disconnect(); reveal(); }, 4000);
+  window.google.accounts.id.renderButton(host, {
     type: 'standard',
     theme: theme === 'dark' ? 'filled_black' : 'outline',
     size: 'large',

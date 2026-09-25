@@ -152,6 +152,16 @@ const call = async (...args) => {
   geminiMode = 'ok';
 }
 
+// Inappropriate language is refused without calling Gemini or using quota
+{
+  const before = calls.length;
+  const { res, body } = await call('/generate', { ip: '6.6.6.6', body: { source: 'یک متن با کلمه کیییر برای تست' } });
+  assert.equal(res.status, 422);
+  assert.equal(body.error, 'inappropriate');
+  assert.equal(calls.length, before, 'no model call');
+  assert.equal((await call('/quota', { method: 'GET', ip: '6.6.6.6' })).body.remaining, 3, 'no quota used');
+}
+
 // Validation
 {
   assert.equal((await call('/generate', { body: { source: '   ' } })).res.status, 400);

@@ -15,6 +15,7 @@ on:
     paths:
       - 'worker/**'
       - 'assets/js/prompt-spec.js'
+      - 'assets/js/moderation.js'
       - '.github/workflows/deploy-worker.yml'
 
 permissions:

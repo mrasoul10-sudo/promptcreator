@@ -10,6 +10,7 @@
 import {
   SYSTEM_PROMPT, OUTPUT_SCHEMA, MAX_SOURCE_LENGTH, ECHO_RETRY_NOTE, buildUserMessage, normalizeOptions, parseResult, isEcho,
 } from '../../assets/js/prompt-spec.js';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from '../../assets/js/moderation.js';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -155,6 +156,8 @@ async function handleGenerate(request, env, origin) {
   const source = typeof payload?.source === 'string' ? payload.source.trim() : '';
   if (!source) return fail(400, 'empty', 'متنی برای تبدیل وارد نشده است.', origin);
   if (source.length > MAX_SOURCE_LENGTH) return fail(413, 'too_long', 'متن بیش از حد طولانی است.', origin);
+  // Refused before any quota or model use; the browser checks too, this is the enforced copy.
+  if (findInappropriate(source).length) return fail(422, 'inappropriate', INAPPROPRIATE_MESSAGE, origin);
   const options = normalizeOptions(payload);
 
   const visitor = await visitorId(request, env);

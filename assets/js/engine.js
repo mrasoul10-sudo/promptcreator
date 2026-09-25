@@ -1,12 +1,13 @@
 // Prompt engine: rewrites a rough idea (Persian or English) into a professional prompt.
 // Default: the site's free service (Gemini behind worker/, no key needed). Optional: Claude with the user's own key.
 
-import Anthropic from '../vendor/anthropic-sdk.js?v=202609251117';
-import { FREE_API_URL } from './config.js?v=202609251117';
+import Anthropic from '../vendor/anthropic-sdk.js?v=202609251128';
+import { FREE_API_URL } from './config.js?v=202609251128';
 import {
   TARGETS, LANGS, DETAILS, SYSTEM_PROMPT, OUTPUT_SCHEMA, MAX_SOURCE_LENGTH,
   buildUserMessage, normalizeOptions, parseResult,
-} from './prompt-spec.js?v=202609251117';
+} from './prompt-spec.js?v=202609251128';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251128';
 
 export { TARGETS, LANGS, DETAILS };
 
@@ -53,6 +54,7 @@ export async function generate(source, options, config, signal) {
   const text = String(source || '').trim();
   if (!text) throw new EngineError('متنی برای تبدیل وارد نشده است.', 'empty');
   if (text.length > MAX_SOURCE_LENGTH) throw new EngineError('متن بیش از حد طولانی است.', 'too_long');
+  if (findInappropriate(text).length) throw new EngineError(INAPPROPRIATE_MESSAGE, 'inappropriate');
   const opts = normalizeOptions(options);
   return engineFor(config) === 'claude' ? generateWithClaude(text, opts, config, signal) : generateFree(text, opts, signal);
 }

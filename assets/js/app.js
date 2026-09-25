@@ -1,14 +1,15 @@
 // Prompt Creator (پرامپت‌ساز) — single-page app shell, hash router and views. Layout follows a chat-app pattern:
 // a sidebar with recent prompts, a top bar, and a composer-first home page.
 
-import * as auth from './auth.js?v=202609251117';
-import * as prompts from './prompts.js?v=202609251117';
-import * as engine from './engine.js?v=202609251117';
-import * as google from './google.js?v=202609251117';
+import * as auth from './auth.js?v=202609251128';
+import * as prompts from './prompts.js?v=202609251128';
+import * as engine from './engine.js?v=202609251128';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251128';
+import * as google from './google.js?v=202609251128';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download,
-} from './ui.js?v=202609251117';
+} from './ui.js?v=202609251128';
 
 const APP_NAME = 'پرامپت‌ساز';
 const view = $('#view');
@@ -65,6 +66,8 @@ const ROUTES = {
   '/archive': { render: renderArchive, title: 'آرشیو', auth: true },
   '/profile': { render: renderProfile, title: 'حساب کاربری', auth: true },
   '/settings': { render: renderSettings, title: 'تنظیمات', auth: true },
+  '/help': { render: renderHelp, title: 'راهنما', auth: false },
+  '/rules': { render: renderRules, title: 'قوانین', auth: false },
 };
 
 const AUTH_REASONS = {
@@ -125,10 +128,6 @@ function syncQuery(values) {
 
 // ---------- Sidebar & top bar ----------
 
-function sidebarOpen() {
-  return mobileQuery.matches ? document.body.classList.contains('drawer-open') : !document.body.classList.contains('sidebar-closed');
-}
-
 function toggleSidebar() {
   if (mobileQuery.matches) {
     document.body.classList.toggle('drawer-open');
@@ -188,6 +187,10 @@ async function renderSidebar() {
           <button class="btn btn-primary btn-block btn-sm" data-login="login">ورود</button>
         </div>`}
     </div>
+    <nav class="sb-nav sb-secondary" aria-label="راهنما">
+      <a class="sb-item ${active === '/help' ? 'active' : ''}" href="#/help">${icon('help')}<span>راهنما</span></a>
+      <a class="sb-item ${active === '/rules' ? 'active' : ''}" href="#/rules">${icon('shield')}<span>قوانین</span></a>
+    </nav>
     <div class="sb-foot">
       ${user ? `
         <button class="sb-user" id="user-menu-btn" aria-haspopup="menu" aria-expanded="false">
@@ -200,21 +203,25 @@ async function renderSidebar() {
   $('#sb-new').addEventListener('click', newPrompt);
   $$('[data-toggle-sidebar]', sidebar).forEach((b) => b.addEventListener('click', toggleSidebar));
   $$('[data-login]', sidebar).forEach((b) => b.addEventListener('click', () => openAuthModal({ mode: b.dataset.login })));
-  $$('[data-theme-toggle]', sidebar).forEach((b) => b.addEventListener('click', () => { toggleTheme(); renderSidebar(); }));
+  $$('[data-theme-toggle]', sidebar).forEach((b) => b.addEventListener('click', () => { toggleTheme(); renderSidebar(); renderTopbar(); }));
   $('#user-menu-btn')?.addEventListener('click', (e) => openUserMenu(e.currentTarget));
   if (user) fillRecent(user);
 }
 
+let recentToken = 0;
+
 async function fillRecent(user) {
-  const box = $('#sb-recent');
-  if (!box) return;
+  // The sidebar can re-render while the list loads; only the latest call may write, into the live element.
+  const token = ++recentToken;
   const rows = (await prompts.listForUser(user.id)).slice(0, 40);
-  if (!$('#sb-recent') || auth.currentUser()?.id !== user.id) return;
+  const box = $('#sb-recent');
+  if (token !== recentToken || !box || auth.currentUser()?.id !== user.id) return;
   if (!rows.length) {
     box.innerHTML = '<p class="sb-empty">پرامپت‌هایی که می‌سازید اینجا نمایش داده می‌شوند.</p>';
     return;
   }
-  const currentId = parseHash().path === '/studio' ? studio.result?.id : null;
+  const { path, params } = parseHash();
+  const currentId = path === '/studio' ? params.get('p') || studio.result?.id : null;
   const groups = new Map();
   for (const r of rows) {
     const label = groupLabel(r.createdAt);
@@ -253,7 +260,7 @@ function openUserMenu(anchor) {
   setTimeout(() => document.addEventListener('mousedown', outside));
   menu.addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
-    if (act === 'theme') { toggleTheme(); close(); renderSidebar(); return; }
+    if (act === 'theme') { toggleTheme(); close(); renderSidebar(); renderTopbar(); return; }
     if (act === 'logout') { close(); logout(); return; }
     if (e.target.closest('a')) close();
   });
@@ -278,11 +285,13 @@ function renderTopbar() {
       ${user ? '' : `
         <button class="btn btn-primary btn-pill btn-sm" data-login="login">ورود</button>
         <button class="btn btn-outline btn-pill btn-sm tb-signup" data-login="register">ثبت‌نام رایگان</button>`}
+      <button class="icon-btn tb-theme" aria-label="تغییر تم روشن و تیره" title="${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}</button>
       <button class="icon-btn tb-new" aria-label="پرامپت جدید" title="پرامپت جدید">${icon('edit')}</button>
     </div>`;
   $$('[data-toggle-sidebar]', bar).forEach((b) => b.addEventListener('click', toggleSidebar));
   $$('[data-login]', bar).forEach((b) => b.addEventListener('click', () => openAuthModal({ mode: b.dataset.login })));
   $('.tb-new', bar).addEventListener('click', newPrompt);
+  $('.tb-theme', bar).addEventListener('click', () => { toggleTheme(); renderTopbar(); renderSidebar(); });
 }
 
 // ---------- Auth dialog ----------
@@ -522,7 +531,7 @@ async function renderStudio(params) {
         </div>` : ''}
       <div class="thread" id="thread" aria-live="polite"></div>
       <div class="empty-hero" ${threadMode ? 'hidden' : ''}>
-        <h1>${firstName ? `${esc(firstName)}، امروز چه پرامپتی بسازیم؟` : 'امروز چه پرامپتی بسازیم؟'}</h1>
+        <h1>${firstName ? `سلام ${esc(firstName)}، امروز چه پرامپتی برات بسازم؟` : 'سلام، امروز چه پرامپتی برات بسازم؟'}</h1>
       </div>
       <div class="composer-wrap">
         ${composerHtml(draft)}
@@ -637,6 +646,15 @@ async function runGeneration() {
   const data = Object.fromEntries(new FormData(form));
   const text = data.source.trim();
   if (!text) return;
+  if (findInappropriate(text).length) {
+    // Refuse before sign-in or any request; the worker enforces the same rule.
+    toast(INAPPROPRIATE_MESSAGE, 'error', 6000);
+    form.classList.remove('shake');
+    void form.offsetWidth;
+    form.classList.add('shake');
+    $('#source')?.focus();
+    return;
+  }
   if (!auth.currentUser()) {
     // Guests can write freely; signing in is asked for only when they generate. The draft is kept.
     if (!(await openAuthModal({ reason: 'برای ساخت پرامپت و ذخیره آن در تاریخچه، وارد شوید یا یک حساب رایگان بسازید.' }))) return;
@@ -1395,6 +1413,7 @@ function renderSettings() {
       else localStorage.setItem(THEME_KEY, value);
     } catch { /* ignore */ }
     renderSidebar();
+    renderTopbar();
   });
   $('#export-btn').addEventListener('click', async () => {
     const data = await prompts.exportData(auth.currentUser());
@@ -1413,6 +1432,55 @@ function renderSettings() {
       toast(err instanceof SyntaxError ? 'فایل JSON معتبر نیست.' : err.message, 'error');
     }
   });
+}
+
+// ---------- Help & rules ----------
+
+function renderHelp() {
+  const topics = [
+    ['sparkles', 'پرامپت‌ساز چیست؟', 'ایده، درخواست یا یادداشت خامتان را به فارسی یا انگلیسی (حتی محاوره‌ای و نامرتب) بنویسید؛ پرامپت‌ساز آن را به یک پرامپت حرفه‌ای، ساختاریافته و دقیق برای ChatGPT، Claude، Gemini، ابزارهای ساخت تصویر و ویدیو یا دستیارهای برنامه‌نویسی تبدیل می‌کند؛ به فارسی، انگلیسی یا هر دو.'],
+    ['edit', 'ساخت اولین پرامپت', 'در صفحه اصلی متن خود را بنویسید و دکمه ارسال (فلش) را بزنید یا Enter را فشار دهید. برای رفتن به خط بعد Shift+Enter بزنید. اگر وارد نشده باشید، پنجره ورود باز می‌شود و بعد از ورود ساخت پرامپت خودکار ادامه پیدا می‌کند.'],
+    ['sliders', 'گزینه‌های ساخت', '«نوع پرامپت» را روی «تشخیص خودکار» بگذارید تا نوع مناسب (برنامه‌نویسی، تصویر، ویدیو، نویسندگی، تحقیق، بازاریابی، ایجنت یا عمومی) خودکار انتخاب شود، یا خودتان انتخاب کنید. «زبان خروجی» و «میزان جزئیات» (خلاصه، متعادل، جامع) را هم کنار کادر نوشتن تعیین کنید.'],
+    ['copy', 'استفاده از نتیجه', 'نتیجه با زبانه‌های فارسی و انگلیسی نمایش داده می‌شود. با دکمه کپی آن را بردارید، با دکمه آرشیو ذخیره‌اش کنید و با «بهبود دوباره» نتیجه را به ورودی جدید تبدیل کنید تا باز هم بهترش کنید. زیر هر نتیجه «چه چیزهایی بهتر شد؟» تغییرات را توضیح می‌دهد.'],
+    ['history', 'تاریخچه و جستجو', 'هر پرامپتی که می‌سازید خودکار ذخیره می‌شود و در منوی کناری (امروز، دیروز، ۷ روز گذشته و…) دیده می‌شود. در «جستجوی پرامپت‌ها» همه را بر اساس متن و نوع پیدا کنید. جستجو «ي/ی» و «ك/ک» و اعداد فارسی و انگلیسی را یکسان در نظر می‌گیرد.'],
+    ['archive', 'آرشیو پیشرفته', 'پرامپت‌های مهم را با عنوان، پوشه، برچسب، یادداشت و علاقه‌مندی در آرشیو نگه دارید. در آرشیو بر اساس کلمه، پوشه، برچسب، نوع، زبان، بازه زمانی و علاقه‌مندی فیلتر و مرتب کنید، و متن پرامپت‌ها را ویرایش کنید.'],
+    ['user', 'حساب کاربری و ورود', 'با گوگل یا با ایمیل و رمز وارد شوید. با «مرا به خاطر بسپار» بعد از بستن مرورگر هم وارد می‌مانید. بعد از ثبت‌نام یک کد بازیابی می‌گیرید؛ اگر رمز را فراموش کردید با «فراموشی رمز» و همین کد رمز جدید بگذارید. آواتار، نام، ایمیل و رمز را در «حساب کاربری» تغییر دهید.'],
+    ['sun', 'تم روشن و تیره', 'با دکمه خورشید/ماه بالای صفحه یا از منوی حساب، تم را عوض کنید. در «تنظیمات» می‌توانید «مطابق سیستم» را هم انتخاب کنید.'],
+    ['download', 'داده‌ها و پشتیبان‌گیری', 'حساب و پرامپت‌ها فقط در همین مرورگر ذخیره می‌شوند. از «تنظیمات ← پشتیبان‌گیری» فایل پشتیبان بگیرید تا در مرورگر یا دستگاه دیگر بازگردانی کنید. پاک کردن داده‌های مرورگر یا حالت ناشناس، اطلاعات را از بین می‌برد.'],
+    ['key', 'سهمیه رایگان و Claude', 'ساخت پرامپت رایگان است و هر کاربر سهمیه روزانه دارد که زیر کادر نوشتن نمایش داده می‌شود. اگر کلید API شخصی Claude دارید، در «تنظیمات» موتور «Claude با کلید شخصی» را انتخاب کنید تا بدون سقف روزانه کار کنید.'],
+  ];
+  view.innerHTML = `
+    <header class="page-head"><div><h1>راهنمای پرامپت‌ساز</h1><p class="muted">همه چیز درباره قابلیت‌ها و نحوه استفاده.</p></div></header>
+    <div class="help-grid">
+      ${topics.map(([ic, title, body]) => `
+        <article class="help-card">
+          <span class="help-icon">${icon(ic)}</span>
+          <h2>${title}</h2>
+          <p>${body}</p>
+        </article>`).join('')}
+    </div>
+    <section class="card help-cta">
+      <div><h2>آماده‌اید؟</h2><p class="muted">اولین پرامپت حرفه‌ای‌تان را همین حالا بسازید.</p></div>
+      <a class="btn btn-primary btn-pill" href="#/studio">شروع ساخت پرامپت</a>
+    </section>`;
+}
+
+function renderRules() {
+  const rules = [
+    ['ممنوعیت محتوای نامناسب', 'استفاده از کلمات رکیک، توهین‌آمیز، جنسی، نفرت‌پراکن یا تبعیض‌آمیز مجاز نیست. سامانه این متن‌ها را خودکار تشخیص می‌دهد و برای آن‌ها پرامپت نمی‌سازد.'],
+    ['ممنوعیت استفاده غیرقانونی یا آسیب‌زا', 'ساخت پرامپت برای فعالیت‌های غیرقانونی، کلاه‌برداری، آزار و اذیت، نقض حریم خصوصی دیگران یا تولید محتوای خطرناک ممنوع است.'],
+    ['اطلاعات محرمانه وارد نکنید', 'در سرویس رایگان، متن شما برای پردازش به سرویس هوش مصنوعی گوگل (Gemini) فرستاده می‌شود و ممکن است برای بهبود مدل‌ها استفاده شود. رمز، اطلاعات بانکی، مدارک شناسایی و اسرار کاری را وارد نکنید.'],
+    ['سقف استفاده رایگان', 'هر کاربر روزانه تعداد محدودی پرامپت رایگان دارد و کل سایت هم سقف روزانه دارد. تلاش برای دور زدن این محدودیت‌ها یا استفاده خودکار و انبوه مجاز نیست.'],
+    ['مسئولیت نتیجه', 'پرامپت‌ها توسط هوش مصنوعی ساخته می‌شوند و ممکن است خطا داشته باشند. پیش از استفاده، نتیجه را بررسی کنید. مسئولیت استفاده از خروجی با کاربر است.'],
+    ['مالکیت محتوا', 'متن‌ها و پرامپت‌هایی که می‌سازید متعلق به خودتان است.'],
+    ['حساب و داده‌ها', 'حساب کاربری و پرامپت‌ها فقط در مرورگر شما نگه داشته می‌شوند و مسئولیت نگهداری رمز، کد بازیابی و فایل پشتیبان با خود شماست.'],
+  ];
+  view.innerHTML = `
+    <header class="page-head"><div><h1>قوانین استفاده</h1><p class="muted">با استفاده از پرامپت‌ساز این قوانین را می‌پذیرید.</p></div></header>
+    <ol class="rules-list">
+      ${rules.map(([title, body]) => `<li><h2>${title}</h2><p>${body}</p></li>`).join('')}
+    </ol>
+    <p class="muted small rules-links">متن کامل: <a href="terms.html" target="_blank" rel="noopener">شرایط استفاده</a> · <a href="privacy.html" target="_blank" rel="noopener">حریم خصوصی</a></p>`;
 }
 
 // ---------- Boot ----------

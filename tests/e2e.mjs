@@ -59,7 +59,7 @@ await context.route('https://accounts.google.com/gsi/client', (r) => r.fulfill({
   contentType: 'text/javascript',
   body: `window.google = { accounts: { id: {
     initialize(c) { this.cb = c.callback; },
-    renderButton(el) { const b = document.createElement('button'); b.type = 'button'; b.id = 'gsi-stub'; b.textContent = 'Continue with Google'; b.onclick = () => this.cb({ credential: ${JSON.stringify(idToken)} }); el.appendChild(b); },
+    renderButton(el) { const b = document.createElement('button'); b.type = 'button'; b.id = 'gsi-stub'; b.textContent = 'Continue with Google'; b.onclick = () => this.cb({ credential: ${JSON.stringify(idToken)} }); el.appendChild(b); const f = document.createElement('iframe'); f.src = 'about:blank'; f.style.display = 'none'; el.appendChild(f); },
   } } };`,
 }));
 await context.route('https://api.anthropic.com/**', async (route) => {
@@ -104,9 +104,38 @@ assert.ok(await page.isVisible('.empty-hero'), 'composer-first home page for gue
 assert.ok(await page.isVisible('.topbar [data-login="login"]'), 'login button in the top bar');
 assert.ok(!(await page.isVisible('#auth-form')), 'no login form up front');
 assert.ok(await page.isDisabled('#generate-btn'), 'send is disabled while empty');
+assert.equal(await page.textContent('.empty-hero h1'), 'سلام، امروز چه پرامپتی برات بسازم؟');
+
+// Inappropriate words are refused before sign-in or any request
+await page.fill('#source', 'یک متن با کلمه ک.ی.ر برای تست');
+await page.click('#generate-btn');
+await page.waitForSelector('.toast-error:has-text("نامناسب")');
+assert.ok(!(await page.isVisible('.modal #auth-form')), 'no sign-in dialog for refused text');
+assert.equal(freeRequests.length, 0);
+step('inappropriate language refused client-side');
+
+// Help and rules pages are public
+await page.click('.sb-secondary a[href="#/help"]');
+await page.waitForSelector('.help-card');
+assert.ok((await page.locator('.help-card').count()) >= 8);
+await page.click('.sb-secondary a[href="#/rules"]');
+await page.waitForSelector('.rules-list li');
+await page.click('.tb-title');
+await page.waitForSelector('#composer');
+step('help and rules pages open for guests');
+
+// Theme toggle in the top bar
+const themeBefore = await page.evaluate(() => document.documentElement.dataset.theme || '');
+await page.click('.tb-theme');
+const themeAfter = await page.evaluate(() => document.documentElement.dataset.theme || '');
+assert.notEqual(themeAfter, themeBefore, 'theme toggles');
+await page.click('.tb-theme');
+
 await page.fill('#source', SRC);
 await page.click('#generate-btn');
 await page.waitForSelector('.modal #auth-form');
+await page.waitForSelector('#google-slot.ready');
+assert.equal(await page.evaluate(() => Math.round(document.querySelector('#google-slot').getBoundingClientRect().height)), 44, 'Google slot keeps a fixed height (no oversized logo)');
 step('guest can write on home; generate opens sign-in dialog');
 
 // Protected page as guest opens the dialog too
@@ -134,6 +163,7 @@ await page.click('.tb-title');
 await page.waitForSelector('#composer');
 assert.equal(await page.inputValue('#source'), SRC, 'draft kept');
 assert.ok(!(await page.isVisible('.banner')), 'free engine needs no API key');
+assert.equal(await page.textContent('.empty-hero h1'), 'سلام رسول، امروز چه پرامپتی برات بسازم؟', 'greets the user by first name');
 step('email-first sign-up, recovery code, returned to archive, draft kept');
 
 // Free engine (default): no key, quota shown and updated, chat-style thread
