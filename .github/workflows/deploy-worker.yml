@@ -84,6 +84,21 @@ jobs:
           git commit -m "Point the site at the free API: $URL"
           git push
 
+      - name: Diagnose Gemini models
+        if: steps.secrets.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          # Prints each configured model's status and error text (never the key) to spot free-tier or naming issues.
+          for m in $(grep -E '^GEMINI_(FALLBACK_)?MODEL' worker/wrangler.toml | cut -d'"' -f2); do
+            code=$(curl -sS -o /tmp/g.json -w '%{http_code}' \
+              "https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent" \
+              -H 'content-type: application/json' -H "x-goog-api-key: $GEMINI_API_KEY" \
+              -d '{"contents":[{"parts":[{"text":"Say OK"}]}],"generationConfig":{"maxOutputTokens":20}}')
+            echo "$m -> HTTP $code: $(node -e 'const b=JSON.parse(require("fs").readFileSync("/tmp/g.json","utf8"));console.log(b.error?b.error.status+" "+b.error.message:"ok, modelVersion="+b.modelVersion)' 2>/dev/null | head -c 400)"
+          done
+
       - name: Smoke test (live worker + Gemini)
         if: steps.secrets.outputs.ready == 'true'
         env:
