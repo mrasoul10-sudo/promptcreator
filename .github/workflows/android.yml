@@ -43,8 +43,36 @@ jobs:
       - name: Create Android project
         run: npx cap add android
 
+      - name: Declare the website and the microphone permission
+        # asset_statements names the sites this app belongs to, so Chrome's getInstalledRelatedApps() on those
+        # sites can tell the app is installed and stop offering it (manifest.webmanifest lists the app).
+        run: |
+          node -e '
+            const fs = require("fs");
+            const sites = ["https://mrasoul10-sudo.github.io", "https://promptsaz.pages.dev"];
+            const json = JSON.stringify(sites.map((site) => ({ relation: ["delegate_permission/common.handle_all_urls"], target: { namespace: "web", site } })));
+            const strings = "android/app/src/main/res/values/strings.xml";
+            fs.writeFileSync(strings, fs.readFileSync(strings, "utf8").replace("</resources>",
+              `    <string name="asset_statements" translatable="false">${json.replace(/"/g, "\\\"")}</string>\n</resources>`));
+            const manifest = "android/app/src/main/AndroidManifest.xml";
+            // Microphone for voice input: the page records with getUserMedia, which the WebView grants
+            // through Capacitor once the app holds these permissions.
+            fs.writeFileSync(manifest, fs.readFileSync(manifest, "utf8")
+              .replace(/(<application[^>]*>)/, `$1\n        <meta-data android:name="asset_statements" android:resource="@string/asset_statements" />`)
+              .replace("</manifest>", `    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n</manifest>`));
+          '
+          grep asset_statements android/app/src/main/res/values/strings.xml android/app/src/main/AndroidManifest.xml
+
       - name: Generate launcher icons and splash screens
         run: npx @capacitor/assets generate --android --iconBackgroundColor '#6C4CF5' --iconBackgroundColorDark '#6C4CF5' --splashBackgroundColor '#ffffff' --splashBackgroundColorDark '#212121'
+
+      - name: Stamp the version into the user agent
+        # The site reads "PromptSazApp/<versionCode>" to tell the installed version and offer updates.
+        run: |
+          node -e 'const f="capacitor.config.json",c=JSON.parse(require("fs").readFileSync(f));c.android.appendUserAgent="PromptSazApp/"+process.env.RUN;require("fs").writeFileSync(f,JSON.stringify(c,null,2))'
+          grep appendUserAgent capacitor.config.json
+        env:
+          RUN: ${{ github.run_number }}
 
       - name: Sync web assets and plugins
         run: npx cap sync android
@@ -77,3 +105,17 @@ jobs:
             نسخه‌های بعدی روی همین نسخه نصب می‌شوند و اطلاعات شما در برنامه حفظ می‌شود.
           files: app-android/promptsaz.apk
           make_latest: true
+
+      - name: Tell the site about the new version
+        # assets/android-version.json is read by the app (assets/js/updates.js) to offer the update.
+        working-directory: .
+        run: |
+          cat > assets/android-version.json <<EOF
+          {"versionCode": ${{ github.run_number }}, "versionName": "1.0.${{ github.run_number }}", "apkUrl": "https://github.com/${{ github.repository }}/releases/download/android-latest/promptsaz.apk", "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+          EOF
+          cat assets/android-version.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/android-version.json
+          git commit -m "Android app version ${{ github.run_number }}"
+          for i in 1 2 3; do git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && break; sleep 5; done

@@ -119,6 +119,12 @@ jobs:
           head -c 3000 /tmp/out.json; echo
           if [ "$code" != "200" ]; then echo "::error::Live /generate returned HTTP $code"; exit 1; fi
           node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/out.json","utf8")).result; if(!r.promptEn||!r.promptFa){console.error("empty prompt");process.exit(1)}'
+          # Voice input: one second of silence as 16 kHz WAV must be accepted (empty text is fine).
+          node -e 'const n=16000,b=Buffer.alloc(44+n*2);b.write("RIFF",0);b.writeUInt32LE(36+n*2,4);b.write("WAVE",8);b.write("fmt ",12);b.writeUInt32LE(16,16);b.writeUInt16LE(1,20);b.writeUInt16LE(1,22);b.writeUInt32LE(n,24);b.writeUInt32LE(n*2,28);b.writeUInt16LE(2,32);b.writeUInt16LE(16,34);b.write("data",36);b.writeUInt32LE(n*2,40);require("fs").writeFileSync("/tmp/silence.wav",b)'
+          vcode=$(curl -sS -o /tmp/voice.json -w '%{http_code}' -X POST "$URL/transcribe" \
+            -H 'content-type: audio/wav' -H 'origin: https://promptsaz.pages.dev' --data-binary @/tmp/silence.wav)
+          echo "transcribe HTTP $vcode: $(head -c 400 /tmp/voice.json)"
+          if [ "$vcode" != "200" ]; then echo "::error::Live /transcribe returned HTTP $vcode"; exit 1; fi
           # Quality sample: an informal Persian change request must come back restructured, not echoed.
           curl -sS -o /tmp/q.json -X POST "$URL/generate" \
             -H 'content-type: application/json' -H 'origin: https://promptsaz.pages.dev' \

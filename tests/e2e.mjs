@@ -21,7 +21,8 @@ function sse(model, json) {
   return events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join('');
 }
 
-const browser = await chromium.launch();
+// A fake microphone (a test tone) so voice input can record without a real device or permission prompt.
+const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
 // bypassCSP only lets Playwright's own waitForFunction helpers run; the app itself never needs eval.
 const context = await browser.newContext({ bypassCSP: true, viewport: { width: 1280, height: 860 } });
 const page = await context.newPage();
@@ -32,32 +33,28 @@ page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resourc
 
 await context.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
 
-// Fake Web Speech recognition: "hears" a fixed Persian sentence when started.
-await context.addInitScript(() => {
-  window.SpeechRecognition = class {
-    start() {
-      setTimeout(() => {
-        this.onresult?.({ resultIndex: 0, results: [Object.assign([{ transcript: 'یک لوگو برای نانوایی' }], { isFinal: true })] });
-        setTimeout(() => this.onend?.(), 50);
-      }, 50);
-    }
-    stop() { this.onend?.(); }
-  };
-});
 
 // Google sign-in: enable it with a test client ID and replace Google's script with a stub that returns a signed-in user.
 const GOOGLE_ID = 'test-client.apps.googleusercontent.com';
 const FREE_API = 'https://promptcreator-api.test.workers.dev';
-await context.route(/assets\/js\/config\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: `export const GOOGLE_CLIENT_ID = '${GOOGLE_ID}';\nexport const FREE_API_URL = '${FREE_API}';\nexport const ANDROID_APK_URL = 'https://github.com/mrasoul10-sudo/promptcreator/releases/download/android-latest/promptsaz.apk';\nexport const ANDROID_RELEASES_URL = 'https://github.com/mrasoul10-sudo/promptcreator/releases/latest';` }));
+const CONFIG_JS = `export const GOOGLE_CLIENT_ID = '${GOOGLE_ID}';\nexport const FREE_API_URL = '${FREE_API}';\nexport const ANDROID_APK_URL = 'https://github.com/mrasoul10-sudo/promptcreator/releases/download/android-latest/promptsaz.apk';\nexport const ANDROID_RELEASES_URL = 'https://github.com/mrasoul10-sudo/promptcreator/releases/latest';`;
+await context.route(/assets\/js\/config\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: CONFIG_JS }));
 
 // Free service (worker/) mock
 const freeRequests = [];
 let freeRemaining = 20;
+const transcribeRequests = [];
 await context.route(`${FREE_API}/**`, async (route) => {
   const req = route.request();
   const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'GET, POST, OPTIONS' };
   if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
   if (req.url().endsWith('/quota')) return route.fulfill({ headers: cors, contentType: 'application/json', body: JSON.stringify({ remaining: freeRemaining, limit: 20 }) });
+  if (req.url().endsWith('/transcribe')) {
+    // Voice input: the browser must send a WAV recording; the worker answers with clean text.
+    const audio = req.postDataBuffer();
+    transcribeRequests.push({ type: req.headers()['content-type'], riff: audio?.subarray(0, 4).toString(), bytes: audio?.length || 0 });
+    return route.fulfill({ headers: cors, contentType: 'application/json', body: JSON.stringify({ text: 'یک لوگو برای نانوایی', language: 'fa', model: 'gemini-flash' }) });
+  }
   const body = JSON.parse(req.postData());
   freeRequests.push(body);
   freeRemaining -= 1;
@@ -154,14 +151,21 @@ assert.ok(await page.isVisible('#sb-new span'), 'labels back when expanded');
 assert.ok(await page.evaluate(() => Boolean(document.querySelector('link[rel=manifest]'))), 'web app manifest linked');
 step('sidebar icon rail toggles');
 
-// Voice dictation fills the composer
+// Voice input: tap to record, tap again to stop; the recording is written down by the free service
 await page.fill('#source', '');
 await page.click('#mic-btn');
-await page.waitForSelector('#mic-btn:not(.listening)');
-await page.waitForTimeout(200);
-assert.equal(await page.inputValue('#source'), 'یک لوگو برای نانوایی', 'dictated text lands in the composer');
+await page.waitForSelector('#mic-btn.listening');
+await page.waitForTimeout(1500);
+assert.equal(transcribeRequests.length, 0, 'nothing is sent while recording');
+await page.click('#mic-btn');
+await page.waitForFunction(() => document.querySelector('#source').value === 'یک لوگو برای نانوایی');
+await page.waitForSelector('#mic-btn:not(.listening):not(.processing)');
+assert.equal(transcribeRequests.length, 1);
+assert.equal(transcribeRequests[0].type, 'audio/wav');
+assert.equal(transcribeRequests[0].riff, 'RIFF', 'recording sent as WAV');
+assert.ok(transcribeRequests[0].bytes > 20000 && transcribeRequests[0].bytes < 200000, `16 kHz mono WAV: ${transcribeRequests[0].bytes} bytes`);
 await page.fill('#source', '');
-step('voice dictation fills the composer');
+step('voice input: tap to record, tap to stop, clean text written into the composer');
 
 // Theme toggle in the top bar
 const themeBefore = await page.evaluate(() => document.documentElement.dataset.theme || '');
@@ -277,6 +281,7 @@ await page.waitForFunction(() => {
   return blocks.length === 1 && blocks[0].dataset.lang === 'en';
 });
 assert.equal(requests.at(-1).body.messages[0].content.includes('English only'), true);
+await page.waitForFunction(() => document.querySelectorAll('.sb-link').length === 3, null, { timeout: 5000 }).catch(() => {});
 assert.equal(await page.locator('.sb-link').count(), 3, 'sidebar lists recent prompts');
 
 // History (search page)
@@ -442,6 +447,24 @@ assert.equal(await page.locator('#password-form input[name=old]').count(), 0, 'G
 assert.equal(await page.textContent('.stats strong'), '۰', 'Google account starts empty');
 step('Google sign-in works and creates its own account');
 
+// What's new: a returning user sees the changes since their last visit once
+await page.evaluate(() => { localStorage.setItem('pc.whatsNewSeen', '1'); location.hash = '#/studio'; });
+await page.waitForSelector('#composer');
+await page.reload();
+await page.waitForSelector('.modal-news .changelog-entry li');
+assert.equal(await page.textContent('#modal-title'), 'تازه‌های این نسخه');
+await page.click('.modal-news [data-action="0"]');
+await page.waitForSelector('.modal-backdrop', { state: 'detached' });
+await page.reload();
+await page.waitForSelector('#composer');
+await page.waitForTimeout(900);
+assert.equal(await page.locator('.modal-news').count(), 0, 'shown only once');
+await openMenu('[data-act=news]');
+await page.waitForSelector('.modal-news .changelog-entry');
+await page.keyboard.press('Escape');
+await page.waitForSelector('.modal-backdrop', { state: 'detached' });
+step("what's new shown once after an update, and from the account menu");
+
 // Mobile layout: drawer sidebar
 await page.setViewportSize({ width: 390, height: 800 });
 await page.goto(`${BASE}#/studio`);
@@ -478,6 +501,43 @@ await ip.waitForSelector('#composer');
 assert.equal(await ip.locator('#app-banner, a[href="#/app"]').count(), 0, 'no download prompts inside the app');
 await inApp.close();
 step('Android banner shown in browsers, dismissible, hidden in the app');
+
+// Android app with the native plugin: update prompt for a newer APK, and native Google sign-in
+const newApp = await browser.newContext({ viewport: { width: 390, height: 800 }, userAgent: 'Mozilla/5.0 (Linux; Android 14; wv) Chrome/130.0 Mobile PromptSazApp/5' });
+await newApp.route(/assets\/js\/config\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: CONFIG_JS }));
+await newApp.route(/assets\/android-version\.json/, (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ versionCode: 7, versionName: '1.0.7', apkUrl: 'https://github.com/x/y.apk' }) }));
+await newApp.addInitScript((token) => {
+  window.Capacitor = { Plugins: {
+    SocialLogin: {
+      initialize: async () => ({}),
+      login: async () => ({ provider: 'google', result: { idToken: token } }),
+    },
+  } };
+}, idToken);
+const np = await newApp.newPage();
+np.on('pageerror', (e) => errors.push(`app: ${e.message}`));
+await np.goto(BASE);
+await np.waitForSelector('.modal-news .update-hero');
+assert.equal(await np.textContent('#modal-title'), 'نسخه جدید اپ آماده است');
+await np.click('.modal-news [data-action="0"]');
+await np.waitForSelector('.modal-backdrop', { state: 'detached' });
+await np.reload();
+await np.waitForSelector('#composer');
+await np.waitForTimeout(900);
+assert.equal(await np.locator('.modal-news').count(), 0, '"later" snoozes the update prompt');
+await np.click('.topbar [data-login="login"]');
+await np.waitForSelector('#google-slot.ready .google-native');
+await np.click('.google-native');
+await np.waitForSelector('#user-menu-btn[data-tip="مریم گوگلی"]', { state: 'attached' });
+await newApp.close();
+const oldApp = await browser.newContext({ userAgent: 'Mozilla/5.0 (Linux; Android 14; wv) Chrome/130.0 Mobile PromptSazApp' });
+const op = await oldApp.newPage();
+await op.goto(BASE);
+await op.click('.topbar [data-login="login"]');
+await op.waitForSelector('#auth-form');
+assert.equal(await op.locator('#google-slot').count(), 0, 'old APK without the plugin: no Google button');
+await oldApp.close();
+step('Android app: update prompt for a newer APK, native Google sign-in');
 
 assert.deepEqual(errors, [], `page errors: ${errors.join('\n')}`);
 await browser.close();

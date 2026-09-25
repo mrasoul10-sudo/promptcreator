@@ -1,6 +1,7 @@
 // "Sign in with Google" via Google Identity Services (client-side only; no backend).
 
-import { GOOGLE_CLIENT_ID } from './config.js?v=202609251245';
+import { GOOGLE_CLIENT_ID } from './config.js?v=202609251322';
+import { icon } from './ui.js?v=202609251322';
 
 const GSI_SRC = 'https://accounts.google.com/gsi/client';
 
@@ -8,13 +9,67 @@ let loader = null;
 let initialized = false;
 let onCredential = null;
 
-/** True inside the Android app shell (app-android/), whose WebView Google does not allow for sign-in. */
+/** True inside the Android app shell (app-android/). */
 export function inAndroidApp() {
   return /PromptSazApp/.test(navigator.userAgent);
 }
 
+/**
+ * Google does not allow its web sign-in inside an app's WebView, so the Android app signs in natively
+ * (Credential Manager, via the @capgo/capacitor-social-login plugin). Older APKs without the plugin get no button.
+ */
+function nativePlugin() {
+  return inAndroidApp() ? window.Capacitor?.Plugins?.SocialLogin || null : null;
+}
+
 export function enabled() {
-  return Boolean(GOOGLE_CLIENT_ID) && !inAndroidApp();
+  return Boolean(GOOGLE_CLIENT_ID) && (!inAndroidApp() || Boolean(nativePlugin()));
+}
+
+let nativeReady = null;
+
+/** Native sign-in in the Android app: resolves with Google's ID token (audience: the web client ID). */
+async function nativeSignIn() {
+  const plugin = nativePlugin();
+  nativeReady ||= plugin.initialize({ google: { webClientId: GOOGLE_CLIENT_ID, mode: 'online' } });
+  try {
+    await nativeReady;
+  } catch (err) {
+    nativeReady = null;
+    throw err;
+  }
+  const res = await plugin.login({ provider: 'google', options: { scopes: ['email', 'profile'] } });
+  const token = res?.result?.idToken;
+  if (!token) throw new Error('گوگل اطلاعات ورود را برنگرداند. دوباره تلاش کنید.');
+  return token;
+}
+
+function renderNativeButton(container, callback, onError) {
+  container.querySelector('.gsi-host')?.remove();
+  const host = document.createElement('div');
+  host.className = 'gsi-host';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn google-native';
+  button.innerHTML = `${icon('google')}<span>ادامه با گوگل</span>`;
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      await callback(await nativeSignIn());
+    } catch (err) {
+      const text = String(err?.code || err?.message || '');
+      if (/cancel/i.test(text)) return; // the user closed Google's account sheet
+      console.error(err);
+      onError?.(new Error(/28444|developer console|10:/i.test(text)
+        ? 'ورود با گوگل در اپ هنوز راه‌اندازی نشده است. فعلاً با ایمیل وارد شوید.'
+        : 'ورود با گوگل انجام نشد. مطمئن شوید یک حساب گوگل روی گوشی فعال است و دوباره تلاش کنید.'));
+    } finally {
+      button.disabled = false;
+    }
+  });
+  host.appendChild(button);
+  container.appendChild(host);
+  container.classList.add('ready');
 }
 
 function load() {
@@ -35,7 +90,8 @@ function load() {
 }
 
 /** Renders Google's button into `container`; `callback(profile)` runs after a successful sign-in. */
-export async function renderButton(container, callback, { theme = 'light' } = {}) {
+export async function renderButton(container, callback, { theme = 'light', onError } = {}) {
+  if (nativePlugin()) { renderNativeButton(container, callback, onError); return; }
   onCredential = callback;
   await load();
   if (!initialized) {

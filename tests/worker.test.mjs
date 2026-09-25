@@ -34,6 +34,9 @@ globalThis.fetch = async (url, init) => {
     return Response.json({ error: { code: 429, message: 'Resource exhausted' } }, { status: 429 });
   }
   if (geminiMode === 'down') return Response.json({ error: { message: 'boom' } }, { status: 500 });
+  if (body.contents[0].parts[0].inlineData) {
+    return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ text: 'یک لوگو برای کافه می‌خواهم.', language: 'fa' }) }] }, finishReason: 'STOP' }], modelVersion: 'gemini-flash' });
+  }
   if (geminiMode === 'echo' && !body.contents[0].parts[0].text.includes('repeated the input')) {
     const src = body.contents[0].parts[0].text.split('<input>\n')[1].split('\n</input>')[0];
     return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ title: 't', detected_language: 'fa', prompt_en: '', prompt_fa: src, notes: [] }) }] }, finishReason: 'STOP' }] });
@@ -172,6 +175,48 @@ const call = async (...args) => {
 
 // Raw IPs are never stored
 assert.ok([...env.QUOTA.map.keys()].every((k) => !k.includes('1.2.3.4')));
+
+// Voice input: POST /transcribe takes a WAV recording, returns clean text, and uses its own daily counter
+{
+  const wav = new Uint8Array(4000);
+  wav.set([...'RIFF'].map((c) => c.charCodeAt(0)), 0);
+  wav.set([...'WAVE'].map((c) => c.charCodeAt(0)), 8);
+  const send = (bytes, type = 'audio/wav', ip = '9.9.9.9') => worker.fetch(new Request('https://api.test/transcribe', {
+    method: 'POST', headers: { 'content-type': type, origin: ORIGIN, 'cf-connecting-ip': ip }, body: bytes,
+  }), env);
+  geminiMode = 'ok';
+  const before = calls.length;
+  let res = await send(wav);
+  let body = await res.json();
+  assert.equal(res.status, 200, JSON.stringify(body));
+  assert.equal(body.text, 'یک لوگو برای کافه می‌خواهم.');
+  assert.equal(body.language, 'fa');
+  const sent = calls.at(-1).body;
+  assert.equal(sent.contents[0].parts[0].inlineData.mimeType, 'audio/wav');
+  assert.equal(sent.contents[0].parts[0].inlineData.data, Buffer.from(wav).toString('base64'), 'audio forwarded as base64');
+  assert.ok(sent.systemInstruction.parts[0].text.includes('Never translate'), 'fixed server-side transcription prompt');
+  assert.equal(calls.length, before + 1);
+  // Not WAV, wrong type, or too large: refused without calling Gemini
+  assert.equal((await send(new Uint8Array(4000))).status, 400);
+  assert.equal((await send(wav, 'application/json')).status, 415);
+  assert.equal((await send(new Uint8Array(3_000_001).fill(1))).status, 413);
+  assert.equal(calls.length, before + 1);
+  // Voice has its own per-visitor limit; prompt quota is untouched
+  env.DAILY_VOICE_LIMIT_PER_VISITOR = '2';
+  assert.equal((await send(wav)).status, 200);
+  res = await send(wav);
+  body = await res.json();
+  assert.equal(res.status, 429);
+  assert.equal(body.error, 'quota');
+  const q = await worker.fetch(new Request('https://api.test/quota', { headers: { origin: ORIGIN, 'cf-connecting-ip': '9.9.9.9' } }), env);
+  assert.equal((await q.json()).remaining, 3, 'voice does not use the prompt quota');
+  // A failing model refunds the voice counter
+  env.DAILY_VOICE_LIMIT_PER_VISITOR = '5';
+  geminiMode = 'down';
+  assert.equal((await send(wav, 'audio/wav', '8.8.8.8')).status, 502);
+  geminiMode = 'ok';
+  for (let i = 0; i < 5; i += 1) assert.equal((await send(wav, 'audio/wav', '8.8.8.8')).status, 200, 'refunded after failure');
+}
 
 // Prompt layout: a one-paragraph answer gets headings and numbered items on their own lines; Persian punctuation is fixed.
 {

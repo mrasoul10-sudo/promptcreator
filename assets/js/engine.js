@@ -1,13 +1,13 @@
 // Prompt engine: rewrites a rough idea (Persian or English) into a professional prompt.
 // Default: the site's free service (Gemini behind worker/, no key needed). Optional: Claude with the user's own key.
 
-import Anthropic from '../vendor/anthropic-sdk.js?v=202609251245';
-import { FREE_API_URL } from './config.js?v=202609251245';
+import Anthropic from '../vendor/anthropic-sdk.js?v=202609251322';
+import { FREE_API_URL } from './config.js?v=202609251322';
 import {
   TARGETS, LANGS, DETAILS, SYSTEM_PROMPT, OUTPUT_SCHEMA, MAX_SOURCE_LENGTH,
   buildUserMessage, normalizeOptions, parseResult,
-} from './prompt-spec.js?v=202609251245';
-import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251245';
+} from './prompt-spec.js?v=202609251322';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251322';
 
 export { TARGETS, LANGS, DETAILS };
 
@@ -97,6 +97,26 @@ async function generateFree(text, options, signal) {
 }
 
 /** Today's remaining free generations for this visitor, or null if unknown. */
+/** Voice input: sends a WAV recording to the free service, which returns it as clean written text. */
+export async function transcribe(wav, signal) {
+  if (!FREE_API_URL) throw new EngineError('سرویس تبدیل گفتار هنوز راه‌اندازی نشده است.', 'not_configured');
+  let res;
+  try {
+    res = await fetch(`${FREE_API_URL.replace(/\/+$/, '')}/transcribe`, {
+      method: 'POST',
+      headers: { 'content-type': 'audio/wav' },
+      body: wav,
+      signal,
+    });
+  } catch (err) {
+    if (err?.name === 'AbortError') throw new EngineError('درخواست لغو شد.', 'aborted');
+    throw new EngineError('اتصال به سرویس تبدیل گفتار برقرار نشد. اینترنت را بررسی کنید.', 'connection');
+  }
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new EngineError(body?.message || `خطای سرویس (${res.status}). کمی بعد دوباره تلاش کنید.`, body?.error || 'server');
+  return { text: String(body?.text || '').trim(), language: body?.language || 'mixed' };
+}
+
 export async function freeQuota() {
   if (!FREE_API_URL) return null;
   try {

@@ -13,6 +13,8 @@ GEMINI_FALLBACK_MODEL = "gemini-flash-lite-latest"
 DAILY_LIMIT_PER_VISITOR = "20"
 DAILY_LIMIT_GLOBAL = "900"
 PER_MINUTE_LIMIT_GLOBAL = "8"
+# Voice input (POST /transcribe) per visitor per day; shares the global daily and per-minute limits.
+DAILY_VOICE_LIMIT_PER_VISITOR = "40"
 # Secret (never in this file): GEMINI_API_KEY. Set as a GitHub Actions secret; the workflow uploads it.
 
 [[durable_objects.bindings]]

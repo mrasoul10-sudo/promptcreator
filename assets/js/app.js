@@ -1,17 +1,18 @@
 // Prompt Creator (پرامپت‌ساز) — single-page app shell, hash router and views. Layout follows a chat-app pattern:
 // a sidebar with recent prompts, a top bar, and a composer-first home page.
 
-import * as auth from './auth.js?v=202609251245';
-import * as prompts from './prompts.js?v=202609251245';
-import * as engine from './engine.js?v=202609251245';
-import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251245';
-import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251245';
-import * as voice from './voice.js?v=202609251245';
-import * as google from './google.js?v=202609251245';
+import * as auth from './auth.js?v=202609251322';
+import * as prompts from './prompts.js?v=202609251322';
+import * as engine from './engine.js?v=202609251322';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251322';
+import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251322';
+import * as voice from './voice.js?v=202609251322';
+import * as google from './google.js?v=202609251322';
+import * as updates from './updates.js?v=202609251322';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download, logoMark, enableTooltips,
-} from './ui.js?v=202609251245';
+} from './ui.js?v=202609251322';
 
 const APP_NAME = 'پرامپت‌ساز';
 const view = $('#view');
@@ -19,6 +20,25 @@ const DRAFT_KEY = 'pc.draft';
 const THEME_KEY = 'pc.theme';
 const SIDEBAR_KEY = 'pc.sidebar';
 const APP_BANNER_KEY = 'pc.appBanner';
+
+const ANDROID_APP_ID = 'io.github.mrasoul10sudo.promptsaz';
+let appInstalledCheck = null;
+
+/**
+ * True when the Android app is installed on this phone (Chrome's getInstalledRelatedApps: the web manifest lists
+ * the app in related_applications and the app declares this site in its asset_statements; see android.yml).
+ */
+function androidAppInstalled() {
+  appInstalledCheck ||= (async () => {
+    try {
+      const apps = await navigator.getInstalledRelatedApps?.();
+      return Boolean(apps?.some((a) => a.id === ANDROID_APP_ID));
+    } catch {
+      return false;
+    }
+  })();
+  return appInstalledCheck;
+}
 
 /** The "get the Android app" banner: only in Android browsers (not in the app), until dismissed (hidden 30 days). */
 function showAppBanner() {
@@ -383,6 +403,7 @@ function openUserMenu(anchor) {
     <a role="menuitem" href="#/profile">${icon('user')}<span>حساب کاربری</span></a>
     <a role="menuitem" href="#/settings">${icon('settings')}<span>تنظیمات</span></a>
     ${google.inAndroidApp() ? '' : `<a role="menuitem" href="#/app">${icon('phone')}<span>دریافت اپ اندروید</span></a>`}
+    <button role="menuitem" data-act="news">${icon('sparkles')}<span>تازه‌ها</span></button>
     <button role="menuitem" data-act="theme">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}<span>${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}</span></button>
     <hr>
     <button role="menuitem" data-act="logout">${icon('logout')}<span>خروج</span></button>`;
@@ -395,6 +416,7 @@ function openUserMenu(anchor) {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'theme') { toggleTheme(); close(); renderSidebar(); renderTopbar(); return; }
     if (act === 'logout') { close(); logout(); return; }
+    if (act === 'news') { close(); updates.showChangelog(); return; }
     if (e.target.closest('a')) close();
   });
 }
@@ -579,7 +601,7 @@ function openAuthModal({ mode = 'login', reason = '' } = {}) {
           } catch (err) {
             showError(err.message);
           }
-        }, { theme: currentTheme() }).catch((err) => {
+        }, { theme: currentTheme(), onError: (err) => showError(err.message) }).catch((err) => {
           slot.innerHTML = '<p class="muted small"></p>';
           $('p', slot).textContent = err.message;
         });
@@ -659,7 +681,7 @@ async function renderStudio(params) {
 
   view.innerHTML = `
     ${showAppBanner() ? `
-      <div class="app-banner" id="app-banner">
+      <div class="app-banner" id="app-banner" hidden>
         ${logoMark('app-banner-logo')}
         <div><strong>اپ اندروید پرامپت‌ساز</strong><span>سریع‌تر و راحت‌تر، مستقیم از صفحه گوشی</span></div>
         <a class="btn btn-primary btn-pill btn-sm" href="#/app">دریافت</a>
@@ -684,6 +706,8 @@ async function renderStudio(params) {
       </div>
     </section>`;
 
+  // Revealed only once we know the app is not already installed on this phone.
+  if ($('#app-banner')) androidAppInstalled().then((installed) => { if (!installed) $('#app-banner')?.removeAttribute('hidden'); });
   $('#app-banner-close')?.addEventListener('click', () => {
     try { localStorage.setItem(APP_BANNER_KEY, String(Date.now())); } catch { /* ignore */ }
     $('#app-banner')?.remove();
@@ -727,26 +751,34 @@ async function renderStudio(params) {
   });
   const mic = $('#mic-btn');
   if (mic) {
-    let base = '';
-    const setListening = (on) => {
-      mic.classList.toggle('listening', on);
-      mic.setAttribute('aria-pressed', String(on));
-      mic.title = on ? 'پایان گفتن' : 'گفتن به‌جای نوشتن';
-      source.placeholder = on ? 'در حال شنیدن… صحبت کنید' : 'ایده، درخواست یا پرامپت خامتان را بنویسید…';
+    // Tap to record, tap again to stop; the recording is then written down as clean text (voice.js).
+    const idlePlaceholder = source.placeholder;
+    let stopRecording = null;
+    const setState = (state) => {
+      mic.classList.toggle('listening', state === 'recording');
+      mic.classList.toggle('processing', state === 'processing');
+      mic.setAttribute('aria-pressed', String(state === 'recording'));
+      mic.innerHTML = state === 'processing' ? '<span class="spinner"></span>' : icon(state === 'recording' ? 'stop' : 'mic');
+      mic.title = state === 'recording' ? 'پایان و تبدیل به متن' : state === 'processing' ? 'در حال تبدیل گفتار به متن…' : 'گفتن به‌جای نوشتن';
+      mic.setAttribute('aria-label', mic.title);
+      source.placeholder = state === 'recording' ? 'در حال ضبط… صحبت کنید؛ برای پایان دوباره روی میکروفون بزنید'
+        : state === 'processing' ? 'در حال تبدیل گفتار به متن…' : idlePlaceholder;
     };
     mic.addEventListener('click', () => {
-      if (mic.classList.contains('listening')) { voice.stopDictation(); return; }
-      base = source.value.trim();
-      setListening(true);
-      voice.dictate({
-        lang: 'fa-IR',
-        onText: (finalText, interim) => {
-          source.value = [base, finalText, interim].filter(Boolean).join(' ');
+      if (mic.classList.contains('processing')) return;
+      if (stopRecording) { const stop = stopRecording; stopRecording = null; stop(); return; }
+      setState('recording');
+      stopRecording = voice.dictate({
+        onState: setState,
+        onText: (text) => {
+          const base = source.value.trim();
+          source.value = base ? `${base}\n${text}` : text;
           autoGrow();
           sync();
         },
         onEnd: (error) => {
-          setListening(false);
+          stopRecording = null;
+          setState('idle');
           if (error) toast(error, 'error', 6000);
           else source.focus();
         },
@@ -1645,7 +1677,8 @@ function renderHelp() {
     ['key', 'سهمیه رایگان و Claude', 'ساخت پرامپت رایگان است و هر کاربر سهمیه روزانه دارد که زیر کادر نوشتن نمایش داده می‌شود. اگر کلید API شخصی Claude دارید، در «تنظیمات» موتور «Claude با کلید شخصی» را انتخاب کنید تا بدون سقف روزانه کار کنید.'],
   ];
   view.innerHTML = `
-    <header class="page-head"><div><h1>راهنمای پرامپت‌ساز</h1><p class="muted">همه چیز درباره قابلیت‌ها و نحوه استفاده.</p></div></header>
+    <header class="page-head"><div><h1>راهنمای پرامپت‌ساز</h1><p class="muted">همه چیز درباره قابلیت‌ها و نحوه استفاده.</p></div>
+      <button class="btn btn-soft" id="show-news">${icon('sparkles')} تازه‌های نسخه‌ها</button></header>
     <div class="help-grid">
       ${topics.map(([ic, title, body]) => `
         <article class="help-card">
@@ -1658,6 +1691,7 @@ function renderHelp() {
       <div><h2>آماده‌اید؟</h2><p class="muted">اولین پرامپت حرفه‌ای‌تان را همین حالا بسازید.</p></div>
       <a class="btn btn-primary btn-pill" href="#/studio">شروع ساخت پرامپت</a>
     </section>`;
+  $('#show-news').addEventListener('click', () => updates.showChangelog());
 }
 
 function renderRules() {
@@ -1695,12 +1729,13 @@ function renderApp() {
           <h2>${icon('phone')} اندروید</h2>
           <p class="muted">فایل نصبی (APK) را دانلود و نصب کنید. حجم حدود ۴ مگابایت.</p>
           <a class="btn btn-primary btn-pill btn-lg btn-block" id="apk-download" href="${ANDROID_APK_URL}" rel="noopener">${icon('download')} دانلود اپ اندروید</a>
+          <p class="app-installed" id="app-installed" hidden>${icon('check')} اپ روی این گوشی نصب است؛ نسخه جدید را خود اپ خبر می‌دهد.</p>
           <ol class="app-steps">
             <li>روی «دانلود اپ اندروید» بزنید.</li>
             <li>فایل <span dir="ltr">promptsaz.apk</span> را باز کنید.</li>
             <li>اگر گوشی پرسید، اجازه «نصب از منابع ناشناس» را برای مرورگر بدهید و «نصب» را بزنید.</li>
           </ol>
-          <p class="muted small">نسخه‌های جدید روی همین نسخه نصب می‌شوند. در اپ ورود با ایمیل در دسترس است (ورود با گوگل فقط در سایت). <a href="${ANDROID_RELEASES_URL}" target="_blank" rel="noopener">همه نسخه‌ها</a></p>
+          <p class="muted small">نسخه‌های جدید روی همین نسخه نصب می‌شوند و اپ خودش خبر نسخه جدید را می‌دهد. ورود با ایمیل و گوگل در اپ هم در دسترس است. <a href="${ANDROID_RELEASES_URL}" target="_blank" rel="noopener">همه نسخه‌ها</a></p>
         </article>
         <article class="card app-card ${isIOS ? 'is-primary' : ''}">
           <h2>${icon('globe')} آیفون، آیپد و کامپیوتر</h2>
@@ -1713,6 +1748,7 @@ function renderApp() {
         </article>
       </div>
     </section>`;
+  if (isAndroid) androidAppInstalled().then((installed) => { if (installed) $('#app-installed')?.removeAttribute('hidden'); });
   $('#pwa-install')?.addEventListener('click', async () => {
     if (!installPrompt) return;
     installPrompt.prompt();
@@ -1751,6 +1787,11 @@ async function boot() {
   }
   $('#splash')?.classList.add('hide');
   route();
+  // After the first render: in the app, offer a newer APK first; then show what changed since the last visit.
+  setTimeout(async () => {
+    if (google.inAndroidApp()) await updates.checkAppUpdate();
+    if (!$('.modal-backdrop')) await updates.maybeShowWhatsNew({ returning: Boolean(auth.currentUser()) });
+  }, 600);
 }
 
 boot();

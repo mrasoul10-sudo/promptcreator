@@ -379,6 +379,8 @@ body[data-page="studio"] .view { max-width: none; padding: 0; }
 .mic-btn { border-radius: 50%; }
 .mic-btn.listening { color: #fff; background: var(--danger); animation: listen 1.4s ease-in-out infinite; }
 .mic-btn.listening:hover { background: var(--danger); color: #fff; }
+.mic-btn.processing { cursor: progress; }
+.mic-btn .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--surface-3); border-top-color: var(--text); animation: spin 0.8s linear infinite; }
 @keyframes listen { 0%, 100% { box-shadow: 0 0 0 0 rgba(224, 46, 42, 0.45); } 50% { box-shadow: 0 0 0 7px rgba(224, 46, 42, 0); } }
 .send-btn {
   display: grid; place-items: center; flex: none; width: 36px; height: 36px; border: 0; border-radius: 50%;
@@ -613,6 +615,10 @@ button.chip:hover { border-color: var(--border-strong); color: var(--text); }
 /* ---------- Get the app ---------- */
 
 .app-banner { display: flex; align-items: center; gap: 12px; width: calc(100% - 24px); max-width: var(--content-w); margin: 6px auto 0; padding: 10px 12px; border-radius: 16px; background: var(--accent-soft); animation: view-in 0.3s var(--ease) both; }
+.app-banner[hidden] { display: none; }
+.app-installed { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; color: var(--brand); font-weight: 600; font-size: 0.9rem; }
+.app-installed[hidden] { display: none; }
+.app-installed .icon { width: 18px; height: 18px; }
 .app-banner > div { flex: 1; display: flex; flex-direction: column; line-height: 1.5; min-width: 0; }
 .app-banner strong { font-size: 0.92rem; }
 .app-banner span { font-size: 0.78rem; color: var(--text-2); }
@@ -658,6 +664,10 @@ button.chip:hover { border-color: var(--border-strong); color: var(--text); }
 /* Until Google's own stylesheet arrives, its placeholder renders an unsized logo; keep it tiny and hidden. */
 .google-slot svg { width: 18px !important; height: 18px !important; }
 .google-slot:not(.ready) > :not(.google-skeleton) { visibility: hidden; }
+/* Android app: our own button for native Google sign-in (the web button is not allowed inside a WebView). */
+.google-native { width: 100%; height: 44px; gap: 10px; border-radius: 999px; border: 1px solid var(--border-strong, var(--border)); background: var(--surface); color: var(--text); font-weight: 600; }
+.google-native:hover { background: var(--hover); }
+.google-native .icon { width: 18px; height: 18px; }
 .google-slot:not(.ready) .google-skeleton { position: absolute; inset: 0; }
 .google-slot.ready .google-skeleton { display: none; }
 .google-skeleton { width: 100%; height: 44px; border-radius: 99px; }
@@ -736,3 +746,14 @@ button.chip:hover { border-color: var(--border-strong); color: var(--text); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* ---------- What's new / app update dialogs ---------- */
+.modal-news { max-width: 460px; }
+.changelog { display: grid; gap: 14px; }
+.changelog-entry h3 { margin-bottom: 6px; font-size: 0.8rem; font-weight: 600; color: var(--text-3); }
+.changelog-entry ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.changelog-entry li { display: flex; align-items: flex-start; gap: 8px; line-height: 1.8; }
+.changelog-entry li .icon { flex: none; width: 18px; height: 18px; margin-top: 4px; color: var(--brand); }
+.update-hero { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius); background: var(--surface-2, var(--hover)); }
+.update-hero > .icon { flex: none; width: 28px; height: 28px; color: var(--brand); }
+.update-hero p { margin: 2px 0 0; }

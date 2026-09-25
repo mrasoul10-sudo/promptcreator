@@ -4,9 +4,11 @@
   "private": true,
   "description": "Android app for Prompt Creator (پرامپت‌ساز): a Capacitor shell that loads the live site. Built by .github/workflows/android.yml.",
   "dependencies": {
+    "@capacitor-community/text-to-speech": "^8.0.2",
     "@capacitor/android": "^8.5.2",
     "@capacitor/app": "^8.1.1",
-    "@capacitor/core": "^8.5.2"
+    "@capacitor/core": "^8.5.2",
+    "@capgo/capacitor-social-login": "^8.5.11"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",

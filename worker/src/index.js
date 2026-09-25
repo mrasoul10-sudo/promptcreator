@@ -6,9 +6,12 @@
 //   GET  /quota     -> { remaining, limit }            (for the calling visitor, today)
 //   POST /generate  -> { result, model, usage, remaining }
 //        body: { source, type, lang, detail }
+//   POST /transcribe -> { text, language, model }
+//        body: a 16 kHz mono WAV recording (content-type audio/wav), at most MAX_AUDIO_BYTES
 
 import {
   SYSTEM_PROMPT, OUTPUT_SCHEMA, MAX_SOURCE_LENGTH, ECHO_RETRY_NOTE, buildUserMessage, normalizeOptions, parseResult, isEcho,
+  TRANSCRIBE_PROMPT, TRANSCRIPT_SCHEMA, MAX_AUDIO_BYTES,
 } from '../../assets/js/prompt-spec.js';
 import { findInappropriate, INAPPROPRIATE_MESSAGE } from '../../assets/js/moderation.js';
 
@@ -54,6 +57,7 @@ function limits(env) {
     perVisitor: Number(env.DAILY_LIMIT_PER_VISITOR) || 20,
     global: Number(env.DAILY_LIMIT_GLOBAL) || 900,
     perMinute: Number(env.PER_MINUTE_LIMIT_GLOBAL) || 8,
+    perVisitorVoice: Number(env.DAILY_VOICE_LIMIT_PER_VISITOR) || 40,
   };
 }
 
@@ -83,6 +87,7 @@ function geminiSchema(schema) {
 }
 
 const RESPONSE_SCHEMA = geminiSchema(OUTPUT_SCHEMA);
+const TRANSCRIPT_RESPONSE_SCHEMA = geminiSchema(TRANSCRIPT_SCHEMA);
 
 class UpstreamError extends Error {
   constructor(status, code, message) {
@@ -132,6 +137,52 @@ async function callGemini(env, model, source, options, retryNote = '') {
     result,
     model: body.modelVersion || model,
     usage: { input: body.usageMetadata?.promptTokenCount || 0, output: body.usageMetadata?.candidatesTokenCount || 0 },
+  };
+}
+
+function toBase64(bytes) {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+async function callGeminiTranscribe(env, model, audioBase64) {
+  const res = await fetch(`${GEMINI_BASE}/${encodeURIComponent(model)}:generateContent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: TRANSCRIBE_PROMPT }] },
+      contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'audio/wav', data: audioBase64 } }, { text: 'Write down this recording.' }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: TRANSCRIPT_RESPONSE_SCHEMA,
+        maxOutputTokens: 4096,
+        temperature: 0.2,
+      },
+    }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const detail = body?.error?.message || `HTTP ${res.status}`;
+    if (res.status === 429) throw new UpstreamError(429, 'upstream_busy', detail);
+    if (res.status === 404) throw new UpstreamError(404, 'model_not_found', detail);
+    if (res.status === 400 || res.status === 403) throw new UpstreamError(res.status, 'upstream_rejected', detail);
+    throw new UpstreamError(502, 'upstream_error', detail);
+  }
+  const candidate = body?.candidates?.[0];
+  if (!candidate) throw new UpstreamError(502, 'empty', 'no candidates');
+  if (candidate.finishReason === 'SAFETY' || candidate.finishReason === 'PROHIBITED_CONTENT') throw new UpstreamError(422, 'blocked', candidate.finishReason);
+  const text = (candidate.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || '').join('');
+  let data;
+  try {
+    data = JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
+  } catch {
+    throw new UpstreamError(502, 'parse', 'invalid JSON from model');
+  }
+  return {
+    text: String(data.text || '').trim().slice(0, MAX_SOURCE_LENGTH),
+    language: ['fa', 'en', 'mixed'].includes(data.language) ? data.language : 'mixed',
+    model: body.modelVersion || model,
   };
 }
 
@@ -195,6 +246,44 @@ async function handleGenerate(request, env, origin) {
   return fail(lastError?.status || 502, code, USER_MESSAGES[code] || USER_MESSAGES.upstream_error, origin, { detail });
 }
 
+async function handleTranscribe(request, env, origin) {
+  if (!env.GEMINI_API_KEY) return fail(503, 'not_configured', 'سرویس رایگان هنوز پیکربندی نشده است.', origin);
+  if (!(request.headers.get('content-type') || '').startsWith('audio/wav')) return fail(415, 'bad_request', 'درخواست نامعتبر است.', origin);
+  if (Number(request.headers.get('content-length') || 0) > MAX_AUDIO_BYTES) return fail(413, 'too_long', 'صدای ضبط‌شده بیش از حد طولانی است.', origin);
+  const audio = new Uint8Array(await request.arrayBuffer());
+  if (audio.length > MAX_AUDIO_BYTES) return fail(413, 'too_long', 'صدای ضبط‌شده بیش از حد طولانی است.', origin);
+  // A WAV file starts with "RIFF....WAVE"; anything else is refused before any quota or model use.
+  const riff = String.fromCharCode(...audio.subarray(0, 4)) === 'RIFF' && String.fromCharCode(...audio.subarray(8, 12)) === 'WAVE';
+  if (!riff || audio.length < 1000) return fail(400, 'empty', 'صدایی ضبط نشد. دوباره تلاش کنید.', origin);
+
+  const visitor = await visitorId(request, env);
+  const quota = await quotaCall(env, 'consume', { visitor, day: today(), limits: limits(env), kind: 'voice' });
+  if (!quota.ok) {
+    const message = quota.reason === 'visitor'
+      ? `سهمیه امروز شما برای گفتن با صدا (${quota.limit} بار) تمام شده است. متن را تایپ کنید یا فردا دوباره امتحان کنید.`
+      : quota.reason === 'minute'
+        ? 'درخواست‌ها زیاد است. یک دقیقه بعد دوباره تلاش کنید.'
+        : 'سهمیه رایگان امروز سایت تمام شده است. فردا دوباره امتحان کنید.';
+    return fail(429, 'quota', message, origin);
+  }
+  const data = toBase64(audio);
+  const models = [env.GEMINI_MODEL || 'gemini-flash-latest', env.GEMINI_FALLBACK_MODEL].filter(Boolean);
+  let lastError;
+  for (const model of models) {
+    try {
+      return json(await callGeminiTranscribe(env, model, data), 200, origin);
+    } catch (err) {
+      lastError = err;
+      if (!(err instanceof UpstreamError) || !['upstream_busy', 'model_not_found', 'upstream_error'].includes(err.code)) break;
+    }
+  }
+  await quotaCall(env, 'refund', { visitor, day: today(), kind: 'voice' });
+  const code = lastError instanceof UpstreamError ? lastError.code : 'upstream_error';
+  console.error('transcribe failed', code, lastError?.message);
+  const detail = String(lastError?.message || '').replace(/key=[^&\s]+/gi, 'key=***').slice(0, 300);
+  return fail(lastError?.status || 502, code, USER_MESSAGES[code] || USER_MESSAGES.upstream_error, origin, { detail });
+}
+
 async function handleQuota(request, env, origin) {
   const visitor = await visitorId(request, env);
   const q = await quotaCall(env, 'peek', { visitor, day: today(), limits: limits(env) });
@@ -211,6 +300,7 @@ export default {
     if (url.pathname === '/health') return json({ ok: true, model: env.GEMINI_MODEL || 'gemini-flash-latest', configured: Boolean(env.GEMINI_API_KEY) }, 200, origin);
     if (url.pathname === '/quota' && request.method === 'GET') return handleQuota(request, env, origin);
     if (url.pathname === '/generate' && request.method === 'POST') return handleGenerate(request, env, origin);
+    if (url.pathname === '/transcribe' && request.method === 'POST') return handleTranscribe(request, env, origin);
     return fail(404, 'not_found', 'Not found', origin);
   },
 };
@@ -224,8 +314,11 @@ export class Quota {
 
   async fetch(request) {
     const action = new URL(request.url).pathname.slice(1);
-    const { visitor, day, limits: lim } = await request.json();
-    const vKey = `v:${day}:${visitor}`;
+    const { visitor, day, limits: lim, kind } = await request.json();
+    // Voice transcriptions have their own per-visitor counter; the global and per-minute counters are shared.
+    const voice = kind === 'voice';
+    const vKey = `${voice ? 'a' : 'v'}:${day}:${visitor}`;
+    const perVisitor = voice ? lim?.perVisitorVoice || 40 : lim?.perVisitor; // refund sends no limits
     const gKey = `g:${day}`;
     const minute = Math.floor(Date.now() / 60000);
     const mKey = `m:${minute}`;
@@ -239,12 +332,12 @@ export class Quota {
       return Response.json({ ok: true });
     }
     // consume
-    if (v >= lim.perVisitor) return Response.json({ ok: false, reason: 'visitor', limit: lim.perVisitor });
+    if (v >= perVisitor) return Response.json({ ok: false, reason: 'visitor', limit: perVisitor });
     if (g >= lim.global) return Response.json({ ok: false, reason: 'global' });
     if (m >= lim.perMinute) return Response.json({ ok: false, reason: 'minute' });
     await this.storage.put({ [vKey]: v + 1, [gKey]: g + 1, [mKey]: m + 1 });
     await this.cleanup(day, minute);
-    return Response.json({ ok: true, remaining: Math.max(0, Math.min(lim.perVisitor - v - 1, lim.global - g - 1)) });
+    return Response.json({ ok: true, remaining: Math.max(0, Math.min(perVisitor - v - 1, lim.global - g - 1)) });
   }
 
   /** Drops counters from previous days/minutes, at most once per minute. */
@@ -253,7 +346,8 @@ export class Quota {
     this.lastCleanup = minute;
     const stale = [];
     for (const key of (await this.storage.list()).keys()) {
-      if ((key.startsWith('v:') || key.startsWith('g:')) && !key.startsWith(`v:${day}:`) && key !== `g:${day}`) stale.push(key);
+      if ((key.startsWith('v:') || key.startsWith('a:') || key.startsWith('g:'))
+        && !key.startsWith(`v:${day}:`) && !key.startsWith(`a:${day}:`) && key !== `g:${day}`) stale.push(key);
       if (key.startsWith('m:') && Number(key.slice(2)) < minute) stale.push(key);
     }
     for (let i = 0; i < stale.length; i += 128) await this.storage.delete(stale.slice(i, i + 128));
