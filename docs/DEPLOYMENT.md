@@ -34,9 +34,32 @@
    ```
 5. تغییر را commit و push کنید.
 
-## کلید API
+## سرویس رایگان ساخت پرامپت (Gemini روی Cloudflare)
 
-برای ساخت پرامپت، هر کاربر باید کلید API خودش را در صفحه «تنظیمات» برنامه وارد کند:
+با این سرویس، کاربران **بدون کلید و بدون هزینه** پرامپت می‌سازند. کلید Gemini شما فقط روی سرور Cloudflare نگه داشته می‌شود و کسی آن را نمی‌بیند. هر بازدیدکننده روزانه تعداد محدودی پرامپت رایگان دارد (پیش‌فرض ۲۰، کل سایت ۹۰۰ و حداکثر ۸ درخواست در دقیقه). این اعداد در `worker/wrangler.toml` تغییر می‌کنند.
+
+### یک بار انجام دهید
+1. **کلید Gemini**: به <https://aistudio.google.com/apikey> بروید، با حساب گوگل وارد شوید و **Create API key** را بزنید. کارت بانکی لازم نیست.
+2. **حساب Cloudflare**: در <https://dash.cloudflare.com/sign-up> یک حساب رایگان بسازید، سپس یک بار وارد بخش **Workers & Pages** شوید تا زیردامنه `workers.dev` شما ساخته شود.
+3. **Account ID**: در صفحه **Workers & Pages** (یا Overview حساب)، مقدار **Account ID** را کپی کنید.
+4. **API Token**: به **My Profile → API Tokens → Create Token** بروید، قالب **Edit Cloudflare Workers** را انتخاب کنید و **Continue to summary → Create Token** را بزنید. توکن را کپی کنید.
+5. در گیت‌هاب به **Settings → Secrets and variables → Actions → New repository secret** بروید و این سه Secret را بسازید:
+
+   | Name | Value |
+   |---|---|
+   | `GEMINI_API_KEY` | کلید مرحله ۱ |
+   | `CLOUDFLARE_ACCOUNT_ID` | مقدار مرحله ۳ |
+   | `CLOUDFLARE_API_TOKEN` | توکن مرحله ۴ |
+
+6. در تب **Actions** ریپازیتوری، workflow با نام **Deploy free API (Cloudflare Worker)** را انتخاب کنید و **Run workflow** را بزنید.
+
+این workflow سرور را تست و منتشر می‌کند و آدرس آن را خودکار در `assets/js/config.js` قرار می‌دهد. چند دقیقه بعد سایت از سرویس رایگان استفاده می‌کند.
+
+> نکته: در سطح رایگان، گوگل ممکن است از متن درخواست‌ها برای بهبود مدل‌هایش استفاده کند و سقف روزانه درخواست‌ها را هر از گاهی تغییر دهد.
+
+## کلید API Claude (اختیاری)
+
+اگر کاربری بخواهد به‌جای سرویس رایگان از Claude استفاده کند، در «تنظیمات» گزینه «Claude با کلید شخصی» را انتخاب می‌کند و کلید خودش را وارد می‌کند:
 
 1. به <https://console.anthropic.com> بروید و وارد شوید یا ثبت‌نام کنید.
 2. از بخش **Billing** اعتبار اضافه کنید. API از اشتراک Claude Pro/Max جداست و هزینه‌اش جدا حساب می‌شود.

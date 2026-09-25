@@ -20,13 +20,14 @@
 
 - سایت استاتیک است و روی **GitHub Pages** اجرا می‌شود. سرور و دیتابیس لازم ندارد.
 - داده‌ها (حساب، تاریخچه، آرشیو) در **IndexedDB مرورگر** شما ذخیره می‌شوند.
-- ساخت پرامپت با **Claude API** و کلید API خود کاربر انجام می‌شود. درخواست مستقیم از مرورگر به `api.anthropic.com` می‌رود و از SDK رسمی Anthropic استفاده می‌کند.
+- ساخت پرامپت به‌طور پیش‌فرض **رایگان** است: یک سرور کوچک روی Cloudflare (پوشه `worker/`) با کلید Gemini صاحب سایت کار می‌کند و کاربران هیچ کلیدی لازم ندارند (با سقف روزانه برای هر کاربر).
+- هر کاربر می‌تواند در تنظیمات **Claude با کلید شخصی** را انتخاب کند؛ در این حالت درخواست مستقیم از مرورگر به `api.anthropic.com` می‌رود.
 
 ## شروع سریع
 
 1. GitHub Pages را فعال کنید: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 2. آدرس سایت را باز کنید و ثبت‌نام کنید.
-3. در **تنظیمات**، کلید API خود از [console.anthropic.com](https://console.anthropic.com/settings/keys) را وارد کنید.
+3. سرویس رایگان را یک بار راه‌اندازی کنید (کلید Gemini و حساب Cloudflare): [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#سرویس-رایگان-ساخت-پرامپت-gemini-روی-cloudflare)
 4. در **استودیو** پرامپت بسازید.
 
 ## مستندات
@@ -34,9 +35,9 @@
 | فایل | محتوا |
 |---|---|
 | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | راهنمای کامل کاربر (فارسی) |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | راه‌اندازی GitHub Pages و کلید API (فارسی) |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | راه‌اندازی GitHub Pages، ورود با گوگل و سرویس رایگان (فارسی) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | معماری، مدل داده، جستجو، امنیت |
-| [docs/PROMPT_ENGINE.md](docs/PROMPT_ENGINE.md) | جزئیات درخواست به Claude و طراحی پرامپت سیستمی |
+| [docs/PROMPT_ENGINE.md](docs/PROMPT_ENGINE.md) | طراحی پرامپت سیستمی و جزئیات درخواست به Gemini و Claude |
 | [CLAUDE.md](CLAUDE.md) | قواعد و راهنمای توسعه برای ایجنت‌های هوش مصنوعی |
 
 ## توسعه
@@ -45,6 +46,7 @@
 python3 -m http.server 8765      # اجرای محلی: http://localhost:8765/
 npm install                      # فقط ابزارهای توسعه
 npm run test:e2e                 # تست کامل در Chromium با API شبیه‌سازی‌شده
+npm run test:worker              # تست سرور رایگان (worker/)
 npm run build:vendor             # بازسازی باندل SDK در assets/vendor
 ```
 

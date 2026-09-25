@@ -662,3 +662,10 @@ kbd { font-family: var(--mono); font-size: 0.72rem; padding: 1px 6px; border-rad
 .legal h2 { margin: 22px 0 6px; font-size: 1.05rem; }
 .legal p { color: var(--text-2); }
 .legal .btn { margin-top: 24px; }
+
+/* ---------- Engine settings ---------- */
+
+#engine-choice { margin-bottom: 12px; }
+.engine-note { margin-bottom: 8px; }
+.claude-settings[hidden], .engine-note[hidden], #test-key[hidden] { display: none; }
+.quota-note { color: var(--primary-text); }

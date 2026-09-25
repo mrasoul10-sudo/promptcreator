@@ -2,27 +2,40 @@
 
 ## Overview
 
-Prompt Creator is a single-page application made of plain ES modules, served as static files from GitHub Pages. There is no server: the browser stores all data in IndexedDB and talks directly to the Claude API with the user's own API key.
+Prompt Creator is a single-page application made of plain ES modules, served as static files from GitHub Pages. The browser stores all user data in IndexedDB. Prompts are generated either by the site's free service (a stateless Cloudflare Worker that calls Gemini with the site owner's key) or, if the user chooses, by Claude directly with the user's own key.
 
 ```
 ┌──────────────────────── Browser ─────────────────────────┐
 │  index.html ── app.js (router + views)                   │
 │                 │        │          │          │         │
 │              auth.js  prompts.js  engine.js   ui.js      │
-│                 └────┬───┘          │                    │
-│                    db.js            │ @anthropic-ai/sdk  │
-│                 (IndexedDB)         │ (vendor bundle)    │
-└─────────────────────────────────────┼────────────────────┘
-                                      ▼
-                           https://api.anthropic.com
+│                 └────┬───┘     │         │               │
+│                    db.js       │ free    │ own key       │
+│                 (IndexedDB)    │         │ (SDK bundle)  │
+└────────────────────────────────┼─────────┼───────────────┘
+                                 ▼         ▼
+             worker/ (Cloudflare)         https://api.anthropic.com
+       quota Durable Object + GEMINI_API_KEY
+                                 ▼
+          generativelanguage.googleapis.com (Gemini)
 ```
+
+## Free service (`worker/`)
+
+- `POST /generate` accepts only `{source, type, lang, detail}`. The prompt itself is built server-side from `assets/js/prompt-spec.js` (shared with the browser), so the endpoint cannot be used as a general-purpose free LLM.
+- CORS is limited to `ALLOWED_ORIGINS`; requests with any other `Origin` are refused.
+- Quotas in a single SQLite-backed Durable Object: per visitor per UTC day (`DAILY_LIMIT_PER_VISITOR`), whole site per day (`DAILY_LIMIT_GLOBAL`, kept under Gemini's free daily cap) and per minute (`PER_MINUTE_LIMIT_GLOBAL`). Visitors are identified by a salted SHA-256 of their IP; raw IPs are never stored. A failed upstream call refunds the quota.
+- Gemini is called with `responseMimeType: application/json` and a `responseSchema` derived from the shared schema. If the primary model (`GEMINI_MODEL`, default `gemini-flash-latest`) is busy or missing, `GEMINI_FALLBACK_MODEL` is tried.
+- Nothing the user writes is stored by the worker.
+- `.github/workflows/deploy-worker.yml` runs the worker test, deploys with wrangler, and commits the resulting URL into `assets/js/config.js` (`FREE_API_URL`).
 
 ## Modules
 
 | Module | Responsibility |
 |---|---|
 | `app.js` | Hash router, app chrome (sidebar and mobile bottom nav), theme, and all page views. Views render HTML strings built with `esc()`, then attach listeners. |
-| `engine.js` | Builds the Claude request (system prompt, per-type guidance, JSON schema), sends it with the SDK, validates the stop reason, parses JSON, and maps SDK errors to Persian messages. |
+| `engine.js` | Chooses the engine from the user's settings. Free: posts to the worker and reports the remaining daily quota. Claude: builds the request from `prompt-spec.js`, sends it with the SDK, validates the stop reason, parses JSON, and maps SDK errors to Persian messages. |
+| `prompt-spec.js` | Shared by browser and worker: system prompt, per-type guidance, detail levels, JSON schema, option normalization and result parsing. |
 | `prompts.js` | Prompt record CRUD with ownership checks, archive and unarchive, clear history, search (term AND-matching over folded text), filters, sorting, facets (category and tag counts), and backup export/import. |
 | `auth.js` | Local accounts: register, login, logout, session restore ("remember me" → `localStorage`, otherwise `sessionStorage`), profile and settings updates, password change (PBKDF2-SHA256, 210k iterations, random salt), one-time recovery codes and password reset, Google sign-in linking, avatar processing (center crop, 256px re-encode to WebP/PNG), account deletion. |
 | `google.js` | Loads Google Identity Services on demand, renders the button (popup mode), decodes the ID token and checks `aud`, `iss`, `exp` and `email_verified`. |
@@ -80,6 +93,6 @@ History is every record. The archive is `archived === true`.
 - **Google.** Google Identity Services returns an ID token to the page. Without a backend its signature cannot be verified, so it is used only to identify the user for their local account: it is matched or linked by verified email, or a password-less account is created. A session opened with Google may set a new password without the old one, which is the recovery path for Google users.
 - **Persistence.** With "remember me" the session id is kept in `localStorage` and survives closing the browser and restarting the computer. Prompts are always saved in IndexedDB. Clearing site data or using a private window loses both, so export a backup.
 
-## Why no backend
+## Why (almost) no backend
 
-The requirement was a URL that works in any browser, hosted from this GitHub repository. GitHub Pages serves static files only, so the design keeps everything client-side. Moving to real server accounts later would mean replacing `db.js` and `auth.js` with API calls. The views and engine would not need to change.
+The requirement was a URL that works in any browser, hosted from this GitHub repository. GitHub Pages serves static files only, so the design keeps accounts and data client-side. The one exception is the free prompt service, which must exist server-side because an API key can never be shipped to browsers; it is deliberately stateless. Moving to real server accounts later would mean replacing `db.js` and `auth.js` with API calls. The views and engine would not need to change.

@@ -1,13 +1,14 @@
 // Local accounts: stored in IndexedDB, passwords hashed with PBKDF2 (WebCrypto).
 // This protects profiles from casual access on a shared browser; it is not a server-side account.
 
-import * as db from './db.js?v=202609251009';
+import * as db from './db.js?v=202609251027';
 
 const SESSION_KEY = 'pc.session';
 const PBKDF2_ITERATIONS = 210000;
 const AVATAR_SIZE = 256;
 
 export const DEFAULT_SETTINGS = Object.freeze({
+  engine: 'free',
   apiKey: '',
   model: 'claude-opus-5',
   effort: 'medium',

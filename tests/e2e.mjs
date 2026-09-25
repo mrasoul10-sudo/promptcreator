@@ -34,7 +34,22 @@ await context.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
 
 // Google sign-in: enable it with a test client ID and replace Google's script with a stub that returns a signed-in user.
 const GOOGLE_ID = 'test-client.apps.googleusercontent.com';
-await context.route(/assets\/js\/config\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: `export const GOOGLE_CLIENT_ID = '${GOOGLE_ID}';` }));
+const FREE_API = 'https://promptcreator-api.test.workers.dev';
+await context.route(/assets\/js\/config\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: `export const GOOGLE_CLIENT_ID = '${GOOGLE_ID}';\nexport const FREE_API_URL = '${FREE_API}';` }));
+
+// Free service (worker/) mock
+const freeRequests = [];
+let freeRemaining = 20;
+await context.route(`${FREE_API}/**`, async (route) => {
+  const req = route.request();
+  const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'GET, POST, OPTIONS' };
+  if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+  if (req.url().endsWith('/quota')) return route.fulfill({ headers: cors, contentType: 'application/json', body: JSON.stringify({ remaining: freeRemaining, limit: 20 }) });
+  const body = JSON.parse(req.postData());
+  freeRequests.push(body);
+  freeRemaining -= 1;
+  return route.fulfill({ headers: cors, contentType: 'application/json', body: JSON.stringify({ result: mockResult(body.source), model: 'gemini-flash', usage: { input: 1, output: 1 }, remaining: freeRemaining }) });
+});
 const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const idToken = `${b64url({ alg: 'none' })}.${b64url({ iss: 'https://accounts.google.com', aud: GOOGLE_ID, sub: 'g-123', email: 'maryam@gmail.com', email_verified: true, name: 'مریم گوگلی', exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
 await context.route('https://accounts.google.com/gsi/client', (r) => r.fulfill({
@@ -55,8 +70,12 @@ await context.route('https://api.anthropic.com/**', async (route) => {
   }
   const body = JSON.parse(req.postData());
   requests.push({ url, headers: req.headers(), body });
-  const isCode = body.messages[0].content.includes('python');
-  const out = JSON.stringify(isCode ? {
+  const out = JSON.stringify(mockResult(body.messages[0].content));
+  return route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'text/event-stream' }, body: sse(body.model, out) });
+});
+
+function mockResult(text) {
+  return text.includes('python') ? {
     title: 'Python file renaming script',
     detected_language: 'en',
     prompt_en: 'Role: You are a senior Python developer.\nTask: Write a script that renames files in a folder.',
@@ -68,9 +87,8 @@ await context.route('https://api.anthropic.com/**', async (route) => {
     prompt_en: 'Role: You are a senior brand designer.\nTask: Design a minimalist logo for a cozy café using warm colors.',
     prompt_fa: 'نقش: شما یک طراح ارشد برند هستید.\nوظیفه: یک لوگوی مینیمال برای یک کافه‌ی دنج با رنگ‌های گرم طراحی کنید.',
     notes: ['نقش مشخص شد', 'سبک و رنگ دقیق شد'],
-  });
-  return route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'text/event-stream' }, body: sse(body.model, out) });
-});
+  };
+}
 
 const step = (name) => console.log(`• ${name}`);
 
@@ -106,11 +124,24 @@ assert.match(page.url(), /#\/archive/, 'returns to the page that asked for sign-
 await page.click('a.nav-link[href="#/studio"]');
 await page.waitForSelector('#composer');
 assert.equal(await page.inputValue('#source'), 'یک لوگو برای کافه با رنگ های گرم میخوام', 'draft kept');
-assert.ok(await page.isVisible('.banner'), 'API key banner should show');
+assert.ok(!(await page.isVisible('.banner')), 'free engine needs no API key');
 step('registered in dialog, got recovery code, returned to archive, draft kept');
 
-// Settings: bad key then good key
+// Free engine (default): no key, quota shown and updated
+await page.waitForSelector('#quota-note:has-text("۲۰")');
+await page.click('#generate-btn');
+await page.waitForSelector('.result .prompt-block[data-lang=fa]');
+assert.equal(freeRequests.length, 1);
+assert.equal(freeRequests[0].source, 'یک لوگو برای کافه با رنگ های گرم میخوام');
+assert.deepEqual(Object.keys(freeRequests[0]).sort(), ['detail', 'lang', 'source', 'type']);
+assert.equal(requests.length, 0, 'no Claude call on the free engine');
+await page.waitForSelector('#quota-note:has-text("۱۹")');
+step('free engine: generated without API key, quota updated');
+
+// Settings: switch to Claude with own key (bad key then good key)
 await page.click('a.nav-link[href="#/settings"]');
+assert.ok(!(await page.isVisible('#api-key')), 'Claude fields hidden on the free engine');
+await page.click('#engine-choice label.seg:has(input[value=claude])');
 await page.fill('#api-key', 'sk-ant-wrong');
 await page.click('#test-key');
 await page.waitForSelector('.toast-error');
@@ -125,6 +156,7 @@ await page.click('a.nav-link[href="#/studio"]');
 await page.fill('#source', 'یک لوگو برای کافه با رنگ های گرم میخوام');
 await page.click('label.seg:has(input[value=image])');
 await page.click('#generate-btn');
+await page.waitForSelector('.loading-card');
 await page.waitForSelector('.result .prompt-block[data-lang=en]');
 const req = requests.at(-1);
 assert.equal(req.body.model, 'claude-opus-5');
@@ -144,7 +176,7 @@ await page.fill('#archive-form input[name=category]', 'طراحی');
 await page.fill('#archive-form input[name=tags]', 'لوگو, کافه');
 await page.fill('#archive-form textarea[name=notes]', 'برای مشتری');
 await page.click('.modal-foot button:has-text("ذخیره")');
-await page.waitForSelector('#archive-btn:has-text("در آرشیو")');
+await page.waitForSelector('#archive-btn.btn-soft');
 step('saved to archive with folder and tags');
 
 // Second generation (stays history-only)
@@ -158,14 +190,17 @@ assert.equal(requests.at(-1).body.messages[0].content.includes('English only'), 
 // History
 await page.click('a.nav-link[href="#/history"]');
 await page.waitForSelector('.prompt-card');
-assert.equal(await page.locator('.prompt-card').count(), 2);
-await page.fill('#history-q', 'كافه'); // Arabic kaf must still match Persian "کافه"
+assert.equal(await page.locator('.prompt-card').count(), 3);
+await page.fill('#history-q', 'python');
 await page.waitForFunction(() => document.querySelectorAll('.prompt-card').length === 1);
+await page.fill('#history-q', 'كافه'); // Arabic kaf must still match Persian "کافه"
+await page.waitForFunction(() => document.querySelectorAll('.prompt-card').length === 2);
 step('history lists both, folded Persian search works');
 
 // Archive search & filters
 await page.click('a.nav-link[href="#/archive"]');
-await page.waitForSelector('.prompt-card');
+await page.waitForSelector('#filters');
+await page.waitForSelector('#archive-list .prompt-card');
 assert.equal(await page.locator('.prompt-card').count(), 1);
 await page.fill('#filters input[name=q]', 'مشتری');
 await page.waitForTimeout(300);

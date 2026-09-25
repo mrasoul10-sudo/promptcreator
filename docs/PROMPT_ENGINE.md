@@ -1,8 +1,13 @@
 # Prompt engine
 
-`assets/js/engine.js` turns a rough idea into a professional prompt.
+`assets/js/engine.js` turns a rough idea into a professional prompt with one of two engines:
 
-## Request
+- **Free (default):** posts `{source, type, lang, detail}` to the worker (`FREE_API_URL`), which builds the same prompt from `assets/js/prompt-spec.js` and calls Gemini (`generateContent` with `responseMimeType: application/json` and a `responseSchema` converted from the shared JSON schema: upper-case types, no `additionalProperties`). Thinking parts are ignored; a Markdown code fence around the JSON is tolerated. See `docs/ARCHITECTURE.md` for quotas and fallbacks.
+- **Claude with the user's own key:** described below.
+
+The system prompt, type guidance, detail levels, schema and result parsing are shared by both (`prompt-spec.js`), so output quality rules live in one place.
+
+## Claude request
 
 | Setting | Value | Why |
 |---|---|---|

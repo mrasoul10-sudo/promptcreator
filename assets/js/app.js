@@ -1,13 +1,13 @@
 // Prompt Creator — single-page app shell, hash router and views.
 
-import * as auth from './auth.js?v=202609251009';
-import * as prompts from './prompts.js?v=202609251009';
-import * as engine from './engine.js?v=202609251009';
-import * as google from './google.js?v=202609251009';
+import * as auth from './auth.js?v=202609251027';
+import * as prompts from './prompts.js?v=202609251027';
+import * as engine from './engine.js?v=202609251027';
+import * as google from './google.js?v=202609251027';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download,
-} from './ui.js?v=202609251009';
+} from './ui.js?v=202609251027';
 
 const view = $('#view');
 const DRAFT_KEY = 'pc.draft';
@@ -343,19 +343,19 @@ function renderStudio() {
         <li>${icon('archive')} آرشیو با جستجوی پیشرفته</li>
       </ul>
     </header>`}
-    ${!user || s.apiKey ? '' : `
+    ${user && engine.engineFor(s) === 'claude' && !s.apiKey ? `
       <div class="banner">${icon('key')}
         <div><strong>کلید API هنوز تنظیم نشده است.</strong>
-        <span>برای ساخت پرامپت، کلید API خود از Anthropic را در تنظیمات وارد کنید.</span></div>
+        <span>موتور «Claude با کلید شخصی» انتخاب شده است. کلید را در تنظیمات وارد کنید یا به سرویس رایگان برگردید.</span></div>
         <a class="btn btn-sm btn-primary" href="#/settings">رفتن به تنظیمات</a>
-      </div>`}
+      </div>` : ''}
     <section class="studio">
       <form class="card composer" id="composer">
         <div class="composer-input">
           <textarea id="source" name="source" dir="auto" rows="7" maxlength="20000"
             placeholder="مثلاً: یک پرامپت برای ساخت لوگوی مینیمال یک کافه با رنگ‌های گرم می‌خواهم…">${esc(draft.source)}</textarea>
           <div class="composer-meta">
-            <span id="char-count">${num(draft.source.length)} کاراکتر</span>
+            <span><span id="char-count">${num(draft.source.length)} کاراکتر</span><span id="quota-note" class="quota-note"></span></span>
             <span class="kbd-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> برای ساخت</span>
           </div>
         </div>
@@ -423,8 +423,16 @@ function renderStudio() {
   });
 
   requestAnimationFrame(autoGrow);
+  if (engine.engineFor(s) === 'free') refreshQuotaNote();
   if (studio.busy) showLoading();
   else if (studio.result) showResult(studio.result);
+}
+
+/** Shows today's remaining free generations under the composer (free engine only). */
+async function refreshQuotaNote(known) {
+  const q = Number.isFinite(known) ? { remaining: known } : await engine.freeQuota();
+  const el = $('#quota-note');
+  if (el && q) el.textContent = ` · ${num(q.remaining)} پرامپت رایگان امروز`;
 }
 
 function setBusy(busy) {
@@ -474,7 +482,7 @@ async function runGeneration() {
     if (!(await openAuthModal({ reason: 'برای ساخت پرامپت و ذخیره آن در تاریخچه، وارد شوید یا حساب بسازید.' }))) return;
   }
   const s = auth.settings();
-  if (!s.apiKey) {
+  if (engine.engineFor(s) === 'claude' && !s.apiKey) {
     toast('ابتدا کلید API را در تنظیمات وارد کنید', 'error');
     navigate('/settings');
     return;
@@ -501,6 +509,7 @@ async function runGeneration() {
     studio.result = record;
     if ($('#result')) showResult(record, true);
     toast('پرامپت ساخته و در تاریخچه ذخیره شد', 'success');
+    if (out.remaining != null) refreshQuotaNote(out.remaining);
   } catch (err) {
     const box = $('#result');
     if (box && err.code !== 'aborted') {
@@ -1109,10 +1118,15 @@ async function renderProfile() {
 function renderSettings() {
   const s = auth.settings();
   view.innerHTML = `
-    <header class="page-head"><div><h1>تنظیمات</h1><p class="muted">اتصال به Claude، پیش‌فرض‌ها، ظاهر و پشتیبان‌گیری.</p></div></header>
+    <header class="page-head"><div><h1>تنظیمات</h1><p class="muted">موتور هوش مصنوعی، پیش‌فرض‌ها، ظاهر و پشتیبان‌گیری.</p></div></header>
     <form class="card" id="api-form">
-      <h2 class="card-title">${icon('key')} اتصال به Claude</h2>
-      <p class="muted small">برای ساخت پرامپت به یک کلید API از <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> نیاز دارید. کلید فقط در همین مرورگر ذخیره می‌شود و مستقیماً به سرور Anthropic فرستاده می‌شود.</p>
+      <h2 class="card-title">${icon('sparkles')} موتور هوش مصنوعی</h2>
+      <div class="segmented" id="engine-choice">
+        ${Object.entries(engine.ENGINES).map(([k, l]) => `<label class="seg ${engine.engineFor(s) === k ? 'active' : ''}"><input type="radio" name="engine" value="${k}" ${engine.engineFor(s) === k ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}
+      </div>
+      <p class="muted small engine-note" data-engine="free">رایگان و بدون نیاز به کلید. هر کاربر روزانه تعداد محدودی پرامپت رایگان دارد.${engine.freeServiceReady() ? '' : ' <strong>(این سرویس هنوز روی سایت فعال نشده است.)</strong>'}</p>
+      <div class="claude-settings" data-engine="claude">
+      <p class="muted small">با کلید API خودتان از <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>، بدون محدودیت روزانه. هزینه از حساب API شما کم می‌شود. کلید فقط در همین مرورگر ذخیره می‌شود و مستقیماً به سرور Anthropic فرستاده می‌شود.</p>
       <label class="field"><span>کلید API</span>
         <div class="input-group">
           <input name="apiKey" id="api-key" type="password" dir="ltr" autocomplete="off" spellcheck="false" placeholder="sk-ant-..." value="${esc(s.apiKey)}">
@@ -1127,8 +1141,9 @@ function renderSettings() {
             ${[['low', 'کم — سریع‌تر'], ['medium', 'متوسط — پیشنهادی'], ['high', 'زیاد — دقیق‌تر'], ['xhigh', 'خیلی زیاد']].map(([v, l]) => `<option value="${v}" ${v === s.effort ? 'selected' : ''}>${l}</option>`).join('')}
           </select></label>
       </div>
+      </div>
       <div class="form-actions">
-        <button type="button" class="btn btn-ghost" id="test-key">آزمایش اتصال</button>
+        <button type="button" class="btn btn-ghost" id="test-key" data-engine="claude">آزمایش اتصال</button>
         <button type="submit" class="btn btn-primary">ذخیره</button>
       </div>
     </form>
@@ -1157,6 +1172,14 @@ function renderSettings() {
     </section>`;
 
   const keyInput = $('#api-key');
+  const showEngine = (value) => {
+    $$('#api-form [data-engine]').forEach((el) => { el.hidden = el.dataset.engine !== value; });
+  };
+  showEngine(engine.engineFor(s));
+  $('#engine-choice').addEventListener('change', (e) => {
+    $$('#engine-choice .seg').forEach((seg) => seg.classList.toggle('active', seg.contains(e.target)));
+    showEngine(e.target.value);
+  });
   $('#toggle-key').addEventListener('click', (e) => {
     const show = keyInput.type === 'password';
     keyInput.type = show ? 'text' : 'password';
@@ -1165,8 +1188,12 @@ function renderSettings() {
   $('#api-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.target));
-    await auth.updateSettings({ apiKey: data.apiKey.trim(), model: data.model, effort: data.effort });
-    toast('تنظیمات اتصال ذخیره شد', 'success');
+    if (data.engine === 'claude' && !data.apiKey.trim()) {
+      toast('برای موتور Claude کلید API را وارد کنید', 'error');
+      return;
+    }
+    await auth.updateSettings({ engine: data.engine, apiKey: data.apiKey.trim(), model: data.model, effort: data.effort });
+    toast('تنظیمات موتور ذخیره شد', 'success');
   });
   $('#test-key').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
