@@ -1,6 +1,6 @@
 // "Sign in with Google" via Google Identity Services (client-side only; no backend).
 
-import { GOOGLE_CLIENT_ID } from './config.js?v=202609251141';
+import { GOOGLE_CLIENT_ID } from './config.js?v=202609251158';
 
 const GSI_SRC = 'https://accounts.google.com/gsi/client';
 

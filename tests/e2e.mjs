@@ -48,7 +48,7 @@ await context.addInitScript(() => {
 // Google sign-in: enable it with a test client ID and replace Google's script with a stub that returns a signed-in user.
 const GOOGLE_ID = 'test-client.apps.googleusercontent.com';
 const FREE_API = 'https://promptcreator-api.test.workers.dev';
-await context.route(/assets\/js\/config\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: `export const GOOGLE_CLIENT_ID = '${GOOGLE_ID}';\nexport const FREE_API_URL = '${FREE_API}';` }));
+await context.route(/assets\/js\/config\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: `export const GOOGLE_CLIENT_ID = '${GOOGLE_ID}';\nexport const FREE_API_URL = '${FREE_API}';\nexport const ANDROID_APK_URL = 'https://github.com/mrasoul10-sudo/promptcreator/releases/download/android-latest/promptsaz.apk';\nexport const ANDROID_RELEASES_URL = 'https://github.com/mrasoul10-sudo/promptcreator/releases/latest';` }));
 
 // Free service (worker/) mock
 const freeRequests = [];
@@ -135,7 +135,12 @@ await page.click('.sb-secondary a[href="#/rules"]');
 await page.waitForSelector('.rules-list li');
 await page.click('.tb-title');
 await page.waitForSelector('#composer');
-step('help and rules pages open for guests');
+await page.click('.sb-secondary a[href="#/app"]');
+await page.waitForSelector('#apk-download');
+assert.match(await page.getAttribute('#apk-download', 'href'), /releases\/download\/android-latest\/promptsaz\.apk$/);
+await page.click('.tb-title');
+await page.waitForSelector('#composer');
+step('help, rules and app download pages open for guests');
 
 // Desktop sidebar collapses to an icon rail (like chat apps) and expands again
 await page.click('.sb-toggle');
@@ -370,6 +375,17 @@ await page.click('.modal-foot button:has-text("ذخیره کردم")');
 await page.waitForSelector('#user-menu-btn');
 step('forgot password: wrong code rejected, right code resets and signs in');
 
+// Regression: hovering the avatar in the collapsed rail must not make the page scroll (it used to flicker)
+await page.click('.sb-toggle');
+await page.waitForTimeout(300);
+await page.hover('#user-menu-btn');
+const heights = await page.evaluate(async () => { const out = []; for (let i = 0; i < 10; i += 1) { out.push(document.documentElement.scrollHeight - innerHeight); await new Promise((r) => setTimeout(r, 12)); } return out; });
+assert.ok(heights.every((h) => h <= 0), `no page overflow while the tooltip appears: ${heights}`);
+await page.mouse.move(600, 300);
+await page.click('.sb-toggle');
+await page.waitForTimeout(300);
+step('rail tooltip does not overflow the page');
+
 // Google sign-in creates a separate account
 await openMenu('[data-act=logout]');
 await page.click('.topbar [data-login="login"]');
@@ -398,6 +414,25 @@ await page.waitForFunction(() => !document.body.classList.contains('drawer-open'
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
 assert.equal(overflow, false, 'no horizontal scroll on mobile');
 step('mobile layout: drawer sidebar, no horizontal overflow');
+
+// Android browser: dismissible "get the app" banner; never shown inside the app itself
+const android = await browser.newContext({ viewport: { width: 390, height: 800 }, userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36' });
+const ap = await android.newPage();
+await ap.goto(BASE);
+await ap.waitForSelector('#app-banner');
+await ap.click('#app-banner-close');
+await ap.waitForSelector('#app-banner', { state: 'detached' });
+await ap.reload();
+await ap.waitForSelector('#composer');
+assert.equal(await ap.locator('#app-banner').count(), 0, 'banner stays dismissed');
+await android.close();
+const inApp = await browser.newContext({ userAgent: 'Mozilla/5.0 (Linux; Android 14; wv) Chrome/130.0 Mobile PromptSazApp' });
+const ip = await inApp.newPage();
+await ip.goto(BASE);
+await ip.waitForSelector('#composer');
+assert.equal(await ip.locator('#app-banner, a[href="#/app"]').count(), 0, 'no download prompts inside the app');
+await inApp.close();
+step('Android banner shown in browsers, dismissible, hidden in the app');
 
 assert.deepEqual(errors, [], `page errors: ${errors.join('\n')}`);
 await browser.close();

@@ -1,22 +1,43 @@
 // Prompt Creator (پرامپت‌ساز) — single-page app shell, hash router and views. Layout follows a chat-app pattern:
 // a sidebar with recent prompts, a top bar, and a composer-first home page.
 
-import * as auth from './auth.js?v=202609251141';
-import * as prompts from './prompts.js?v=202609251141';
-import * as engine from './engine.js?v=202609251141';
-import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251141';
-import * as voice from './voice.js?v=202609251141';
-import * as google from './google.js?v=202609251141';
+import * as auth from './auth.js?v=202609251158';
+import * as prompts from './prompts.js?v=202609251158';
+import * as engine from './engine.js?v=202609251158';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251158';
+import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251158';
+import * as voice from './voice.js?v=202609251158';
+import * as google from './google.js?v=202609251158';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download, logoMark,
-} from './ui.js?v=202609251141';
+} from './ui.js?v=202609251158';
 
 const APP_NAME = 'پرامپت‌ساز';
 const view = $('#view');
 const DRAFT_KEY = 'pc.draft';
 const THEME_KEY = 'pc.theme';
 const SIDEBAR_KEY = 'pc.sidebar';
+const APP_BANNER_KEY = 'pc.appBanner';
+
+/** The "get the Android app" banner: only in Android browsers (not in the app), until dismissed (hidden 30 days). */
+function showAppBanner() {
+  if (google.inAndroidApp() || !/Android/i.test(navigator.userAgent)) return false;
+  try {
+    const dismissed = Number(localStorage.getItem(APP_BANNER_KEY) || 0);
+    return Date.now() - dismissed > 30 * 86400000;
+  } catch {
+    return true;
+  }
+}
+
+// Browsers that support installing the site as an app (PWA) fire this; the app page offers it as a button.
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  $('#pwa-install')?.removeAttribute('hidden');
+});
 const mobileQuery = matchMedia('(max-width: 860px)');
 
 // Studio state survives navigation within the session.
@@ -69,6 +90,7 @@ const ROUTES = {
   '/settings': { render: renderSettings, title: 'تنظیمات', auth: true },
   '/help': { render: renderHelp, title: 'راهنما', auth: false },
   '/rules': { render: renderRules, title: 'قوانین', auth: false },
+  '/app': { render: renderApp, title: 'دریافت اپ', auth: false },
 };
 
 const AUTH_REASONS = {
@@ -191,6 +213,7 @@ async function renderSidebar() {
         </div>`}
     </div>
     <nav class="sb-nav sb-secondary" aria-label="راهنما">
+      ${google.inAndroidApp() ? '' : `<a class="sb-item ${active === '/app' ? 'active' : ''}" href="#/app" data-tip="دریافت اپ">${icon('phone')}<span>دریافت اپ اندروید</span></a>`}
       <a class="sb-item ${active === '/help' ? 'active' : ''}" href="#/help" data-tip="راهنما">${icon('help')}<span>راهنما</span></a>
       <a class="sb-item ${active === '/rules' ? 'active' : ''}" href="#/rules" data-tip="قوانین">${icon('shield')}<span>قوانین</span></a>
     </nav>
@@ -253,6 +276,7 @@ function openUserMenu(anchor) {
     <div class="user-menu-head"><span dir="ltr">${esc(user.email)}</span></div>
     <a role="menuitem" href="#/profile">${icon('user')}<span>حساب کاربری</span></a>
     <a role="menuitem" href="#/settings">${icon('settings')}<span>تنظیمات</span></a>
+    ${google.inAndroidApp() ? '' : `<a role="menuitem" href="#/app">${icon('phone')}<span>دریافت اپ اندروید</span></a>`}
     <button role="menuitem" data-act="theme">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}<span>${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}</span></button>
     <hr>
     <button role="menuitem" data-act="logout">${icon('logout')}<span>خروج</span></button>`;
@@ -528,6 +552,13 @@ async function renderStudio(params) {
   const firstName = user ? String(user.name).split(/\s+/)[0] : '';
 
   view.innerHTML = `
+    ${showAppBanner() ? `
+      <div class="app-banner" id="app-banner">
+        ${logoMark('app-banner-logo')}
+        <div><strong>اپ اندروید پرامپت‌ساز</strong><span>سریع‌تر و راحت‌تر، مستقیم از صفحه گوشی</span></div>
+        <a class="btn btn-primary btn-pill btn-sm" href="#/app">دریافت</a>
+        <button class="icon-btn" id="app-banner-close" aria-label="بستن">${icon('x')}</button>
+      </div>` : ''}
     <section class="studio ${threadMode ? 'is-thread' : 'is-empty'}">
       ${user && engine.engineFor(s) === 'claude' && !s.apiKey ? `
         <div class="banner">${icon('key')}
@@ -547,6 +578,10 @@ async function renderStudio(params) {
       </div>
     </section>`;
 
+  $('#app-banner-close')?.addEventListener('click', () => {
+    try { localStorage.setItem(APP_BANNER_KEY, String(Date.now())); } catch { /* ignore */ }
+    $('#app-banner')?.remove();
+  });
   const form = $('#composer');
   const source = $('#source');
   const send = $('#generate-btn');
@@ -1532,6 +1567,51 @@ function renderRules() {
       ${rules.map(([title, body]) => `<li><h2>${title}</h2><p>${body}</p></li>`).join('')}
     </ol>
     <p class="muted small rules-links">متن کامل: <a href="terms.html" target="_blank" rel="noopener">شرایط استفاده</a> · <a href="privacy.html" target="_blank" rel="noopener">حریم خصوصی</a></p>`;
+}
+
+// ---------- Get the app ----------
+
+function renderApp() {
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  view.innerHTML = `
+    <section class="app-page">
+      <div class="app-hero">
+        ${logoMark('app-hero-logo')}
+        <h1>پرامپت‌ساز روی گوشی شما</h1>
+        <p class="muted">همه امکانات سایت، به شکل یک اپ مستقل روی صفحه اصلی گوشی.</p>
+      </div>
+      <div class="app-cards">
+        <article class="card app-card ${isAndroid ? 'is-primary' : ''}">
+          <h2>${icon('phone')} اندروید</h2>
+          <p class="muted">فایل نصبی (APK) را دانلود و نصب کنید. حجم حدود ۴ مگابایت.</p>
+          <a class="btn btn-primary btn-pill btn-lg btn-block" id="apk-download" href="${ANDROID_APK_URL}" rel="noopener">${icon('download')} دانلود اپ اندروید</a>
+          <ol class="app-steps">
+            <li>روی «دانلود اپ اندروید» بزنید.</li>
+            <li>فایل <span dir="ltr">promptsaz.apk</span> را باز کنید.</li>
+            <li>اگر گوشی پرسید، اجازه «نصب از منابع ناشناس» را برای مرورگر بدهید و «نصب» را بزنید.</li>
+          </ol>
+          <p class="muted small">نسخه‌های جدید روی همین نسخه نصب می‌شوند. در اپ ورود با ایمیل در دسترس است (ورود با گوگل فقط در سایت). <a href="${ANDROID_RELEASES_URL}" target="_blank" rel="noopener">همه نسخه‌ها</a></p>
+        </article>
+        <article class="card app-card ${isIOS ? 'is-primary' : ''}">
+          <h2>${icon('globe')} آیفون، آیپد و کامپیوتر</h2>
+          <p class="muted">نسخه وب را مثل یک اپ روی دستگاه نصب کنید؛ بدون فروشگاه و بدون دانلود.</p>
+          <button class="btn btn-soft btn-pill btn-block" id="pwa-install" ${installPrompt ? '' : 'hidden'}>${icon('download')} نصب روی این دستگاه</button>
+          <ol class="app-steps">
+            <li><strong>آیفون (Safari):</strong> دکمه اشتراک‌گذاری ${icon('upload')} ← «Add to Home Screen».</li>
+            <li><strong>Chrome یا Edge:</strong> از منوی مرورگر گزینه «نصب اپ» یا «Install» را بزنید.</li>
+          </ol>
+        </article>
+      </div>
+    </section>`;
+  $('#pwa-install')?.addEventListener('click', async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice.catch(() => ({}));
+    if (outcome === 'accepted') toast('پرامپت‌ساز روی دستگاه نصب شد', 'success');
+    installPrompt = null;
+    $('#pwa-install')?.setAttribute('hidden', '');
+  });
 }
 
 // ---------- Boot ----------
