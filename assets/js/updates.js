@@ -1,10 +1,18 @@
 // "What's new" popup after a release, and the Android app's "new version available" prompt.
 // Add a CHANGELOG entry (newest first, id + 1) for every user-visible release.
 
-import { esc, icon, modal } from './ui.js?v=202609251532';
-import { ANDROID_APK_URL } from './config.js?v=202609251532';
+import { esc, icon, modal } from './ui.js?v=202609251545';
+import { ANDROID_APK_URL } from './config.js?v=202609251545';
 
 export const CHANGELOG = [
+  {
+    id: 7,
+    date: '۳ مهر ۱۴۰۵',
+    items: [
+      'آیکون اپ پررنگ‌تر و بزرگ‌تر شد',
+      'آیکون‌های جداگانه برای «قوانین» و «پنل مدیریت»',
+    ],
+  },
   {
     id: 6,
     date: '۳ مهر ۱۴۰۵',

@@ -20,8 +20,8 @@ const jobs = [
 ];
 
 // Android (Capacitor assets): adaptive icon layers, legacy icon and splash screens.
-// Foreground: the logo inside the adaptive-icon safe zone, over the white background layer.
-const symbol = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g transform="translate(16.0 16.0) scale(0.5)"><path d="M11.985 47.638A25.4 25.4 0 0 1 32.0 6.6 M52.015 16.362A25.4 25.4 0 0 1 32.0 57.4" fill="none" stroke="#0A72B5" stroke-width="1.1"/><path d="M32.0 8.4A23.6 23.6 0 0 1 43.8 11.562 M32.0 55.6A23.6 23.6 0 0 1 20.2 52.438" fill="none" stroke="#0A72B5" stroke-width="4.6"/><path d="M46.972 20.302A19 19 0 0 1 22.5 48.454 M17.028 43.698A19 19 0 0 1 41.5 15.546" fill="none" stroke="#0BBEF2" stroke-width="5.2"/></g></svg>`;
+// Foreground: the bold icon version of the logo, as large as the adaptive-icon safe zone allows, over white.
+const symbol = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g transform="translate(9.6 9.6) scale(0.7)"><path d="M11.748 47.822A25.7 25.7 0 0 1 32.0 6.3 M52.252 16.178A25.7 25.7 0 0 1 32.0 57.7" fill="none" stroke="#07408A" stroke-width="1.9"/><path d="M32.0 7.6A24.4 24.4 0 0 1 44.2 10.869 M32.0 56.4A24.4 24.4 0 0 1 19.8 53.131" fill="none" stroke="#07408A" stroke-width="4.4"/><path d="M46.578 20.61A18.5 18.5 0 0 1 22.75 48.021 M17.422 43.39A18.5 18.5 0 0 1 41.25 15.979" fill="none" stroke="#0A84DC" stroke-width="7.4"/></g></svg>`;
 const solid = (color) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="${color}"/></svg>`;
 const splash = (bg) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2732 2732"><rect width="2732" height="2732" fill="${bg}"/><g transform="translate(1110 1110) scale(8)">${logo.replace(/<\/?svg[^>]*>/g, '')}</g></svg>`;
 const androidOut = `${root}app-android/assets`;

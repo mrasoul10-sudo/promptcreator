@@ -1,20 +1,20 @@
 // Prompt Creator (پرامپت‌ساز) — single-page app shell, hash router and views. Layout follows a chat-app pattern:
 // a sidebar with recent prompts, a top bar, and a composer-first home page.
 
-import * as auth from './auth.js?v=202609251532';
-import * as prompts from './prompts.js?v=202609251532';
-import * as engine from './engine.js?v=202609251532';
-import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251532';
-import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251532';
-import * as voice from './voice.js?v=202609251532';
-import * as google from './google.js?v=202609251532';
-import * as updates from './updates.js?v=202609251532';
-import * as sync from './sync.js?v=202609251532';
-import * as api from './api.js?v=202609251532';
+import * as auth from './auth.js?v=202609251545';
+import * as prompts from './prompts.js?v=202609251545';
+import * as engine from './engine.js?v=202609251545';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251545';
+import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251545';
+import * as voice from './voice.js?v=202609251545';
+import * as google from './google.js?v=202609251545';
+import * as updates from './updates.js?v=202609251545';
+import * as sync from './sync.js?v=202609251545';
+import * as api from './api.js?v=202609251545';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download, logoMark, enableTooltips,
-} from './ui.js?v=202609251532';
+} from './ui.js?v=202609251545';
 
 const APP_NAME = 'پرامپت‌ساز';
 const view = $('#view');
@@ -242,9 +242,9 @@ async function renderSidebar() {
         </div>`}
     </div>
     <nav class="sb-nav sb-secondary" aria-label="راهنما">
-      ${auth.isAdmin() ? `<a class="sb-item ${active === '/admin' ? 'active' : ''}" href="#/admin" data-tip="پنل مدیریت">${icon('shield')}<span>پنل مدیریت</span></a>` : ''}
+      ${auth.isAdmin() ? `<a class="sb-item ${active === '/admin' ? 'active' : ''}" href="#/admin" data-tip="پنل مدیریت">${icon('dashboard')}<span>پنل مدیریت</span></a>` : ''}
       <a class="sb-item ${active === '/help' ? 'active' : ''}" href="#/help" data-tip="راهنما">${icon('help')}<span>راهنما</span></a>
-      <a class="sb-item ${active === '/rules' ? 'active' : ''}" href="#/rules" data-tip="قوانین">${icon('shield')}<span>قوانین</span></a>
+      <a class="sb-item ${active === '/rules' ? 'active' : ''}" href="#/rules" data-tip="قوانین">${icon('rules')}<span>قوانین</span></a>
     </nav>
     </div>
     <div class="sb-foot">
@@ -407,7 +407,7 @@ function openUserMenu(anchor) {
     <div class="user-menu-head"><span dir="ltr">${esc(user.email)}</span></div>
     <a role="menuitem" href="#/profile">${icon('user')}<span>حساب کاربری</span></a>
     <a role="menuitem" href="#/settings">${icon('settings')}<span>تنظیمات</span></a>
-    ${auth.isAdmin() ? `<a role="menuitem" href="#/admin">${icon('shield')}<span>پنل مدیریت</span></a>` : ''}
+    ${auth.isAdmin() ? `<a role="menuitem" href="#/admin">${icon('dashboard')}<span>پنل مدیریت</span></a>` : ''}
     ${google.inAndroidApp() ? '' : `<a role="menuitem" href="#/app">${icon('phone')}<span>دریافت اپ اندروید</span></a>`}
     <button role="menuitem" data-act="news">${icon('sparkles')}<span>تازه‌ها</span></button>
     <button role="menuitem" data-act="theme">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}<span>${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}</span></button>
