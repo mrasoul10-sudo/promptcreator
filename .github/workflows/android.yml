@@ -64,7 +64,7 @@ jobs:
           grep asset_statements android/app/src/main/res/values/strings.xml android/app/src/main/AndroidManifest.xml
 
       - name: Generate launcher icons and splash screens
-        run: npx @capacitor/assets generate --android --iconBackgroundColor '#060B14' --iconBackgroundColorDark '#060B14' --splashBackgroundColor '#ffffff' --splashBackgroundColorDark '#212121'
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#FFFFFF' --iconBackgroundColorDark '#FFFFFF' --splashBackgroundColor '#ffffff' --splashBackgroundColorDark '#212121'
 
       - name: Launch screen (the logo, centered)
         # The template draws a full-screen splash image as the window background, which Android stretches to the

@@ -1,20 +1,20 @@
 // Prompt Creator (پرامپت‌ساز) — single-page app shell, hash router and views. Layout follows a chat-app pattern:
 // a sidebar with recent prompts, a top bar, and a composer-first home page.
 
-import * as auth from './auth.js?v=202609251510';
-import * as prompts from './prompts.js?v=202609251510';
-import * as engine from './engine.js?v=202609251510';
-import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251510';
-import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251510';
-import * as voice from './voice.js?v=202609251510';
-import * as google from './google.js?v=202609251510';
-import * as updates from './updates.js?v=202609251510';
-import * as sync from './sync.js?v=202609251510';
-import * as api from './api.js?v=202609251510';
+import * as auth from './auth.js?v=202609251532';
+import * as prompts from './prompts.js?v=202609251532';
+import * as engine from './engine.js?v=202609251532';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251532';
+import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251532';
+import * as voice from './voice.js?v=202609251532';
+import * as google from './google.js?v=202609251532';
+import * as updates from './updates.js?v=202609251532';
+import * as sync from './sync.js?v=202609251532';
+import * as api from './api.js?v=202609251532';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download, logoMark, enableTooltips,
-} from './ui.js?v=202609251510';
+} from './ui.js?v=202609251532';
 
 const APP_NAME = 'پرامپت‌ساز';
 const view = $('#view');
@@ -446,6 +446,7 @@ function renderTopbar() {
       ${user ? '' : `
         <button class="btn btn-primary btn-pill btn-sm" data-login="login">ورود</button>
         <button class="btn btn-outline btn-pill btn-sm tb-signup" data-login="register">ثبت‌نام رایگان</button>`}
+      ${updates.pendingUpdate() ? `<button class="tb-update" data-tip="نسخه ${esc(updates.pendingUpdate().name)} آماده نصب است">${icon('download')}<span>به‌روزرسانی</span></button>` : ''}
       ${google.inAndroidApp() ? '' : `<a class="tb-app" href="#/app" aria-label="دریافت اپ اندروید" data-tip="نصب اپ پرامپت‌ساز روی گوشی اندروید">${icon('phone')}<span>اپ اندروید</span></a>`}
       <button class="icon-btn tb-theme" aria-label="تغییر تم روشن و تیره" title="${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}</button>
       <button class="icon-btn tb-new" aria-label="پرامپت جدید" title="پرامپت جدید">${icon('edit')}</button>
@@ -454,6 +455,7 @@ function renderTopbar() {
   $$('[data-login]', bar).forEach((b) => b.addEventListener('click', () => openAuthModal({ mode: b.dataset.login })));
   $('.tb-new', bar).addEventListener('click', newPrompt);
   $('.tb-theme', bar).addEventListener('click', () => { toggleTheme(); renderTopbar(); renderSidebar(); });
+  $('.tb-update', bar)?.addEventListener('click', () => updates.offerUpdate());
   // Not offered on a phone where the app is already installed.
   if ($('.tb-app', bar)) androidAppInstalled().then((installed) => { if (installed) $('.tb-app', bar)?.remove(); });
 }
@@ -1602,7 +1604,28 @@ function renderSettings() {
         <button class="btn btn-soft" id="export-btn">${icon('download')} دریافت فایل پشتیبان</button>
         <label class="btn btn-ghost">${icon('upload')} بازگردانی از فایل<input type="file" id="import-input" accept="application/json,.json" hidden></label>
       </div>
-    </section>`;
+    </section>
+    ${updates.installedAppVersion() ? `
+    <section class="card">
+      <h2 class="card-title">${icon('phone')} نسخه اپ</h2>
+      <p class="muted small">نسخه نصب‌شده: <strong dir="ltr">1.0.${esc(String(updates.installedAppVersion()))}</strong>. نسخه‌های جدید روی همین نسخه نصب می‌شوند و حساب و پرامپت‌ها حفظ می‌شوند.</p>
+      <div class="form-actions start">
+        <button class="btn btn-soft" id="check-update">${icon('refresh')} بررسی به‌روزرسانی</button>
+        <button class="btn btn-ghost" id="app-news">${icon('sparkles')} تازه‌های نسخه‌ها</button>
+      </div>
+    </section>` : ''}`;
+  $('#check-update')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      if (!(await updates.checkAppUpdate({ manual: true }))) toast('آخرین نسخه اپ را دارید', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $('#app-news')?.addEventListener('click', () => updates.showChangelog());
 
   const keyInput = $('#api-key');
   const showEngine = (value) => {
@@ -1943,6 +1966,11 @@ async function boot() {
   });
   // Profile changed on another device (name, avatar, admin): redraw the chrome.
   window.addEventListener('pc:auth', () => { renderSidebar(); renderTopbar(); });
+  window.addEventListener('pc:app-update', () => renderTopbar());
+  // Coming back to the app later: look for a newer APK again (the button appears without reopening the app).
+  document.addEventListener('visibilitychange', () => {
+    if (google.inAndroidApp() && document.visibilityState === 'visible' && !$('.modal-backdrop')) updates.checkAppUpdate();
+  });
   window.addEventListener('pc:session-ended', (e) => {
     studio.result = null;
     toast(e.detail?.message || 'از حساب خارج شدید. دوباره وارد شوید.', 'error', 7000);
@@ -1950,8 +1978,13 @@ async function boot() {
   });
   // After the first render: in the app, offer a newer APK first; then show what changed since the last visit.
   setTimeout(async () => {
-    if (google.inAndroidApp()) await updates.checkAppUpdate();
-    if (!$('.modal-backdrop')) await updates.maybeShowWhatsNew({ returning: Boolean(auth.currentUser()) });
+    if (google.inAndroidApp()) {
+      // App: first what the installed version brought (after an update or a fresh install), then any newer APK.
+      await updates.maybeShowAppWhatsNew();
+      await updates.checkAppUpdate();
+    } else {
+      await updates.maybeShowWhatsNew({ returning: Boolean(auth.currentUser()) });
+    }
   }, 600);
 }
 

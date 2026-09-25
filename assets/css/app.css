@@ -292,6 +292,10 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2
   background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px);
 }
 .tb-start, .tb-end { display: flex; align-items: center; gap: 6px; }
+/* App only: «به‌روزرسانی» when a newer APK is published. */
+.tb-update { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--brand); color: #fff; font: inherit; font-size: 0.85rem; font-weight: 700; cursor: pointer; animation: pop-in 0.4s var(--ease) both; }
+.tb-update .icon { width: 17px; height: 17px; }
+.tb-update:hover { filter: brightness(1.08); }
 /* «اپ اندروید»: icon + label pill; icon only on narrow screens. */
 .tb-app { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); color: var(--text); font-size: 0.85rem; font-weight: 600; white-space: nowrap; transition: background-color 0.15s, border-color 0.15s; }
 .tb-app:hover { background: var(--hover); border-color: var(--border-strong); }

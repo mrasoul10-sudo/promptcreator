@@ -556,14 +556,24 @@ await newApp.addInitScript((token) => {
 const np = await newApp.newPage();
 np.on('pageerror', (e) => errors.push(`app: ${e.message}`));
 await np.goto(BASE);
+// First run of this APK: what the installed version brings
 await np.waitForSelector('.modal-news .update-hero');
-assert.equal(await np.textContent('#modal-title'), 'نسخه جدید اپ آماده است');
+assert.equal(await np.textContent('#modal-title'), 'به پرامپت‌ساز خوش آمدید');
+await np.click('.modal-news [data-action="0"]');
+// Then the newer published APK
+await np.waitForFunction(() => document.querySelector('#modal-title')?.textContent === 'نسخه جدید اپ آماده است');
 await np.click('.modal-news [data-action="0"]');
 await np.waitForSelector('.modal-backdrop', { state: 'detached' });
+await np.waitForSelector('.topbar .tb-update');
 await np.reload();
 await np.waitForSelector('#composer');
 await np.waitForTimeout(900);
-assert.equal(await np.locator('.modal-news').count(), 0, '"later" snoozes the update prompt');
+assert.equal(await np.locator('.modal-news').count(), 0, '"later" snoozes the update prompt; the welcome shows once');
+await np.waitForSelector('.topbar .tb-update', { timeout: 5000 });
+await np.click('.topbar .tb-update');
+await np.waitForFunction(() => document.querySelector('#modal-title')?.textContent === 'نسخه جدید اپ آماده است');
+await np.click('.modal-news [data-action="0"]');
+await np.waitForSelector('.modal-backdrop', { state: 'detached' });
 await np.click('.topbar [data-login="login"]');
 await np.waitForSelector('#google-slot.ready .google-native');
 await np.click('.google-native');
@@ -576,7 +586,7 @@ await op.click('.topbar [data-login="login"]');
 await op.waitForSelector('#auth-form');
 assert.equal(await op.locator('#google-slot').count(), 0, 'old APK without the plugin: no Google button');
 await oldApp.close();
-step('Android app: update prompt for a newer APK, native Google sign-in');
+step('Android app: welcome/what\'s new once per version, update prompt and top-bar update button, native Google sign-in');
 
 // Same account on another device (e.g. the phone app): its prompts arrive, and changes flow back
 const device = async (label) => {

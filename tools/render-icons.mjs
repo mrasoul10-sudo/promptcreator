@@ -20,7 +20,7 @@ const jobs = [
 ];
 
 // Android (Capacitor assets): adaptive icon layers, legacy icon and splash screens.
-// Foreground: the logo inside the adaptive-icon safe zone, over the navy background layer.
+// Foreground: the logo inside the adaptive-icon safe zone, over the white background layer.
 const symbol = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g transform="translate(16.0 16.0) scale(0.5)"><path d="M11.985 47.638A25.4 25.4 0 0 1 32.0 6.6 M52.015 16.362A25.4 25.4 0 0 1 32.0 57.4" fill="none" stroke="#0A72B5" stroke-width="1.1"/><path d="M32.0 8.4A23.6 23.6 0 0 1 43.8 11.562 M32.0 55.6A23.6 23.6 0 0 1 20.2 52.438" fill="none" stroke="#0A72B5" stroke-width="4.6"/><path d="M46.972 20.302A19 19 0 0 1 22.5 48.454 M17.028 43.698A19 19 0 0 1 41.5 15.546" fill="none" stroke="#0BBEF2" stroke-width="5.2"/></g></svg>`;
 const solid = (color) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="${color}"/></svg>`;
 const splash = (bg) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2732 2732"><rect width="2732" height="2732" fill="${bg}"/><g transform="translate(1110 1110) scale(8)">${logo.replace(/<\/?svg[^>]*>/g, '')}</g></svg>`;
@@ -29,7 +29,7 @@ mkdirSync(androidOut, { recursive: true });
 const androidJobs = [
   ['icon-only.png', maskable, 1024, false],
   ['icon-foreground.png', symbol, 1024, true],
-  ['icon-background.png', solid('#060B14'), 1024, false],
+  ['icon-background.png', solid('#FFFFFF'), 1024, false],
   // Launch screen: the logo alone, drawn by Android at its own size in the middle of a plain background (android.yml).
   ['splash-logo.png', `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g transform="translate(12.8 12.8) scale(0.6)"><path d="M11.985 47.638A25.4 25.4 0 0 1 32.0 6.6 M52.015 16.362A25.4 25.4 0 0 1 32.0 57.4" fill="none" stroke="#0A72B5" stroke-width="1.1"/><path d="M32.0 8.4A23.6 23.6 0 0 1 43.8 11.562 M32.0 55.6A23.6 23.6 0 0 1 20.2 52.438" fill="none" stroke="#0A72B5" stroke-width="4.6"/><path d="M46.972 20.302A19 19 0 0 1 22.5 48.454 M17.028 43.698A19 19 0 0 1 41.5 15.546" fill="none" stroke="#0BBEF2" stroke-width="5.2"/></g></svg>`, 1152, true],
   ['splash.png', splash('#ffffff'), 2732, false],
