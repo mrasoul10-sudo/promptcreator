@@ -3,6 +3,7 @@
 
 import assert from 'node:assert/strict';
 import worker, { Quota } from '../worker/src/index.js';
+import { formatPrompt } from '../assets/js/prompt-spec.js';
 
 // ---- Fake Durable Object namespace backed by a Map ----
 function fakeNamespace() {
@@ -171,5 +172,19 @@ const call = async (...args) => {
 
 // Raw IPs are never stored
 assert.ok([...env.QUOTA.map.keys()].every((k) => !k.includes('1.2.3.4')));
+
+// Prompt layout: a one-paragraph answer gets headings and numbered items on their own lines; Persian punctuation is fixed.
+{
+  const blob = 'نقش و تخصص: به عنوان یک دستیار هوشمند متخصص عمل کنید که آماده کمک به کاربر در زمینه‌های مختلف است. هدف: پاسخ به سلام اولیه کاربر و اعلام آمادگی کامل. دستورالعمل‌های دقیق: 1. با یک سلام مؤدبانه پاسخ دهید. 2. آمادگی خود را اعلام کنید. محدودیت‌ها: پاسخ را کوتاه نگه دارید.';
+  const out = formatPrompt(blob, 'fa');
+  assert.ok(out.startsWith('نقش و تخصص:\nبه عنوان'), out);
+  assert.ok(out.includes('\n\nهدف:\nپاسخ'), out);
+  assert.ok(out.includes('دستورالعمل‌های دقیق:\n۱. با یک سلام مؤدبانه پاسخ دهید.\n۲. آمادگی'), out);
+  assert.ok(out.includes('\n\nمحدودیت‌ها:\nپاسخ'), out);
+  assert.equal(formatPrompt('سلام , خوبی ? این «متن» است .', 'fa'), 'سلام، خوبی؟ این «متن» است.');
+  const laidOut = 'Role:\nYou are X.\n\nGoal:\nDo Y at 16:9.';
+  assert.equal(formatPrompt(laidOut, 'en'), laidOut);
+  assert.equal(formatPrompt('--ar 16:9, cinematic, soft light', 'en'), '--ar 16:9, cinematic, soft light');
+}
 
 console.log('worker tests passed');

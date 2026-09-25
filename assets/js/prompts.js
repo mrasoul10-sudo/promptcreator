@@ -1,12 +1,20 @@
 // Prompt records: history (every generation) and archive (records the user chose to keep).
 
-import * as db from './db.js?v=202609251222';
+import * as db from './db.js?v=202609251236';
+import { formatPrompt } from './prompt-spec.js?v=202609251236';
 
 const EDITABLE = ['title', 'promptEn', 'promptFa', 'notes', 'category', 'tags', 'favorite'];
 
+// Prompts saved before formatPrompt existed may be one long paragraph; tidy them on read (stored data is untouched).
+function tidy(row) {
+  row.promptEn = formatPrompt(row.promptEn, 'en');
+  row.promptFa = formatPrompt(row.promptFa, 'fa');
+  return row;
+}
+
 export async function listForUser(userId) {
   const rows = await db.getAllByIndex('prompts', 'userId', userId);
-  return rows.sort((a, b) => b.createdAt - a.createdAt);
+  return rows.map(tidy).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export async function create(userId, data) {
@@ -42,7 +50,7 @@ async function owned(userId, id) {
 }
 
 export async function get(userId, id) {
-  return owned(userId, id);
+  return tidy(await owned(userId, id));
 }
 
 export async function update(userId, id, patch) {

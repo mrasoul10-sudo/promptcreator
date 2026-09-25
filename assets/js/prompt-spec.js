@@ -54,7 +54,27 @@ Languages:
 - The two versions must be equivalent in meaning and structure.
 - When a language is not requested, return an empty string for that field.
 
-Formatting inside the prompts: plain text with short headings on their own lines and "-" or "1." list items. No Markdown bold, tables or code fences unless the prompt itself needs code.
+Layout inside prompt_en and prompt_fa (plain text; use real line breaks, "\n", inside the JSON strings):
+- Never write the prompt as one paragraph. Every section starts with a short heading on its own line ending with a colon (for example "Role:", "Goal:", "Context:", "Instructions:", "Constraints:", "Expected output:"), and its content starts on the next line.
+- Put one blank line between sections.
+- Each numbered item ("1.", "2.") and each "-" bullet on its own line. Several requirements in a section are always a list, never a run-on sentence.
+- No Markdown bold, tables or code fences unless the prompt itself needs code.
+- Layout example:
+Role:
+You are a senior front-end developer.
+
+Goal:
+Fix the layout of the report page.
+
+Instructions:
+1. Put the filters on one line.
+2. Keep the existing data unchanged.
+
+Persian writing rules for prompt_fa (رعایت دقیق نگارش فارسی، مطابق شیوه‌نامه فرهنگستان):
+- Half-space (ZWNJ, U+200C) for prefixes, suffixes and compounds: می‌کند، نمی‌شود، کتاب‌ها، بزرگ‌ترین، به‌عنوان، به‌صورت، درخواست‌شده، ساده‌تر.
+- Persian punctuation: «،» for commas, «؛» for semicolons, «؟» for questions, «» for quotes. No space before a punctuation mark and one space after it.
+- Persian digits in Persian text and list numbers (۱. ۲. ۳.); keep code, parameters and technical values as written (for example --ar 16:9).
+- Correct spelling and standard written forms, short clear sentences, consistent verb tense and a formal tone throughout.
 
 Also return:
 - title: a short descriptive title (at most 8 words) in the same language as the user's input.
@@ -105,10 +125,44 @@ export function parseResult(raw, options) {
   return {
     title: String(data.title || '').trim(),
     detectedLanguage: ['fa', 'en', 'mixed'].includes(data.detected_language) ? data.detected_language : 'mixed',
-    promptEn: options.lang === 'fa' ? '' : String(data.prompt_en || '').trim(),
-    promptFa: options.lang === 'en' ? '' : String(data.prompt_fa || '').trim(),
+    promptEn: options.lang === 'fa' ? '' : formatPrompt(data.prompt_en, 'en'),
+    promptFa: options.lang === 'en' ? '' : formatPrompt(data.prompt_fa, 'fa'),
     notes: Array.isArray(data.notes) ? data.notes.map(String).slice(0, 6) : [],
   };
+}
+
+const toPersianDigits = (t) => t.replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d]);
+
+/**
+ * Tidies a generated prompt's layout and, for Persian, its punctuation. Models sometimes return the whole
+ * prompt as one paragraph; then section headings ("Goal:", «هدف:») and numbered items are moved onto their
+ * own lines. Text that already has line breaks keeps its layout. Text containing code fences is left as is.
+ */
+export function formatPrompt(text, lang) {
+  let t = String(text || '').replace(/\r\n?/g, '\n').trim();
+  if (!t || t.includes('```')) return t;
+  if ((t.match(/\n/g) || []).length < 2 && t.length > 150) {
+    // Numbered items after a sentence end or a colon: "... دقیق: 1. با ... 2. به ..."
+    t = t.replace(/([.:!?؟؛])[ \t]+(?=(?:\d{1,2}|[۰-۹]{1,2})[.)][ \t])/gu, '$1\n');
+    // Headings of up to five words that end with a colon: at the start or after a sentence end.
+    t = t.replace(/^((?:[^\s:.،؛!?؟]+[ \t]+){0,4}[^\s:.،؛!?؟]+):[ \t]+/u, '$1:\n');
+    t = t.replace(/([.!?؟])[ \t]+((?:[^\s:.،؛!?؟]+[ \t]+){0,4}[^\s:.،؛!?؟\d۰-۹]+):[ \t]*\n?/gu, '$1\n\n$2:\n');
+  }
+  if (lang === 'fa') {
+    t = t
+      .replace(/([\u0600-\u06FF])[ \t]*,[ \t]*/g, '$1، ')
+      .replace(/([\u0600-\u06FF])[ \t]*\?/g, '$1؟')
+      .replace(/([\u0600-\u06FF])[ \t]*;[ \t]*/g, '$1؛ ')
+      .replace(/[ \t]+([،؛؟!»)])/g, '$1')
+      .replace(/([\u0600-\u06FF»)])[ \t]+([.:])(?=\s|$)/g, '$1$2')
+      .replace(/([،؛؟])(?=[\u0600-\u06FF«])/g, '$1 ')
+      .replace(/^([ \t]*)(\d{1,2})([.)-])(?=[ \t])/gm, (m, sp, n, p) => sp + toPersianDigits(n) + p);
+  }
+  return t
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /**
