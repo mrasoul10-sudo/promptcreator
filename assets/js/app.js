@@ -1,13 +1,13 @@
 // Prompt Creator — single-page app shell, hash router and views.
 
-import * as auth from './auth.js?v=202609250935';
-import * as prompts from './prompts.js?v=202609250935';
-import * as engine from './engine.js?v=202609250935';
-import * as google from './google.js?v=202609250935';
+import * as auth from './auth.js?v=202609250941';
+import * as prompts from './prompts.js?v=202609250941';
+import * as engine from './engine.js?v=202609250941';
+import * as google from './google.js?v=202609250941';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download,
-} from './ui.js?v=202609250935';
+} from './ui.js?v=202609250941';
 
 const view = $('#view');
 const DRAFT_KEY = 'pc.draft';
@@ -212,7 +212,7 @@ function openAuthModal({ mode = 'login', reason = '' } = {}) {
           <p class="form-error" role="alert" hidden></p>
           <button class="btn btn-primary btn-block" type="submit"></button>
         </form>
-        <p class="auth-note">${icon('info')} حساب و اطلاعات شما فقط در همین مرورگر ذخیره می‌شود. برای انتقال به دستگاه دیگر از «پشتیبان‌گیری» در تنظیمات استفاده کنید.</p>
+        <p class="auth-note">${icon('info')} <span>حساب و اطلاعات شما فقط در همین مرورگر ذخیره می‌شود. برای انتقال به دستگاه دیگر از «پشتیبان‌گیری» در تنظیمات استفاده کنید. <a href="privacy.html" target="_blank" rel="noopener">حریم خصوصی</a></span></p>
       </div>`,
     onMount: (root, close) => {
       const form = $('#auth-form', root);

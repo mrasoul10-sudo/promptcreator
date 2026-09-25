@@ -1,7 +1,7 @@
 // Local accounts: stored in IndexedDB, passwords hashed with PBKDF2 (WebCrypto).
 // This protects profiles from casual access on a shared browser; it is not a server-side account.
 
-import * as db from './db.js?v=202609250935';
+import * as db from './db.js?v=202609250941';
 
 const SESSION_KEY = 'pc.session';
 const PBKDF2_ITERATIONS = 210000;

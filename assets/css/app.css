@@ -654,3 +654,11 @@ kbd { font-family: var(--mono); font-size: 0.72rem; padding: 1px 6px; border-rad
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
+
+/* ---------- Legal pages ---------- */
+
+.legal { max-width: 820px; }
+.legal h1 { margin-bottom: 4px; }
+.legal h2 { margin: 22px 0 6px; font-size: 1.05rem; }
+.legal p { color: var(--text-2); }
+.legal .btn { margin-top: 24px; }

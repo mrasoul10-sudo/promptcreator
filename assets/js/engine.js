@@ -1,6 +1,6 @@
 // Prompt engine: rewrites a rough idea (Persian or English) into a professional prompt via the Claude API.
 
-import Anthropic from '../vendor/anthropic-sdk.js?v=202609250935';
+import Anthropic from '../vendor/anthropic-sdk.js?v=202609250941';
 
 export const MODELS = [
   { id: 'claude-opus-5', label: 'Claude Opus 5 — بالاترین کیفیت' },
