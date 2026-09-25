@@ -32,7 +32,7 @@ assets/js/prompt-spec.js Shared system prompt, per-type guidance, JSON schema, o
 assets/js/moderation.js  Shared inappropriate-language filter (browser + worker)
 assets/js/updates.js    Changelog / "what's new" popup and the Android app's new-version prompt
 assets/js/voice.js      Voice: tap-to-record / tap-to-stop input (MediaRecorder → 16 kHz WAV → worker /transcribe → Gemini writes clean text in the spoken language; not the browser's SpeechRecognition, whose Google servers are unreachable from Iran) and read-aloud (speechSynthesis; native TTS plugin in the Android app)
-assets/img/             logo.svg (brand mark, #6C4CF5), app-icon.svg + favicon.svg (rounded-square icon), logo-maskable.svg, icons/ (PNGs from tools/render-icons.mjs)
+assets/img/             logo.svg (blue split-ring logo), app-icon.svg + favicon.svg (logo on a navy rounded square), logo-maskable.svg, icons/ (PNGs from tools/render-icons.mjs)
 manifest.webmanifest    Installable web app (PWA) manifest
 app-android/            Android app: Capacitor shell loading the live site (config, offline page, icon/splash sources, signing key)
 .github/workflows/android.yml  Builds the APK and publishes it as the android-latest release
