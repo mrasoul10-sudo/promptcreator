@@ -1,6 +1,6 @@
 // Prompt records: history (every generation) and archive (records the user chose to keep).
 
-import * as db from './db.js';
+import * as db from './db.js?v=202609250935';
 
 const EDITABLE = ['title', 'promptEn', 'promptFa', 'notes', 'category', 'tags', 'favorite'];
 

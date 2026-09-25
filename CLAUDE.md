@@ -34,6 +34,7 @@ assets/js/ui.js         esc, icons, toasts, modal, clipboard, date formatting (f
 assets/vendor/          Bundled Anthropic SDK (generated)
 tests/e2e.mjs           Playwright end-to-end test with a mocked Claude API
 tools/build-vendor.mjs  Rebuilds the SDK bundle
+tools/bump-version.mjs  Stamps ?v=<version> on asset URLs and module imports (cache-busting)
 docs/                   Architecture, prompt engine, deployment, user guide
 ```
 
@@ -57,6 +58,8 @@ npm run test:e2e                   # headless Chromium, Claude API mocked, no ke
 The e2e test covers register, API key test, generation (and asserts the exact request shape: model, `fallbacks`, beta header, `output_config`), archive save, history search including Arabic/Persian letter folding, archive filters, avatar upload, password change, re-login persistence and the mobile layout. Run it after any change to JS or CSS.
 
 ## Conventions
+
+- **Cache-busting:** every local CSS/JS reference carries `?v=<version>` (index.html and all relative `import` specifiers). After changing anything under `assets/`, run `npm run bump` before committing, otherwise returning visitors can get a mix of cached old and new modules. Always write new imports as `'./x.js'`; the bump script adds the version.
 
 - UI strings are Persian and written inline in the views; there is no i18n layer.
 - Routes are `#/studio` (public home), `#/history`, `#/archive`, `#/profile`, `#/settings` (need sign-in: a guest is kept on the studio, the auth dialog opens, and on success they are sent to the page they asked for). There are no login pages; `openAuthModal()` is the only sign-in UI. Filters are mirrored into the hash query string (bookmarkable) via `syncQuery()` without re-routing.

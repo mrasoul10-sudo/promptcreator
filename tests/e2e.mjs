@@ -34,7 +34,7 @@ await context.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
 
 // Google sign-in: enable it with a test client ID and replace Google's script with a stub that returns a signed-in user.
 const GOOGLE_ID = 'test-client.apps.googleusercontent.com';
-await context.route('**/assets/js/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: `export const GOOGLE_CLIENT_ID = '${GOOGLE_ID}';` }));
+await context.route(/assets\/js\/config\.js/, (r) => r.fulfill({ contentType: 'text/javascript', body: `export const GOOGLE_CLIENT_ID = '${GOOGLE_ID}';` }));
 const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const idToken = `${b64url({ alg: 'none' })}.${b64url({ iss: 'https://accounts.google.com', aud: GOOGLE_ID, sub: 'g-123', email: 'maryam@gmail.com', email_verified: true, name: 'مریم گوگلی', exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
 await context.route('https://accounts.google.com/gsi/client', (r) => r.fulfill({
