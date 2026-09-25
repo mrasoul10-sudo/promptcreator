@@ -1,6 +1,6 @@
 // "Sign in with Google" via Google Identity Services (client-side only; no backend).
 
-import { GOOGLE_CLIENT_ID } from './config.js?v=202609250958';
+import { GOOGLE_CLIENT_ID } from './config.js?v=202609251009';
 
 const GSI_SRC = 'https://accounts.google.com/gsi/client';
 
@@ -41,6 +41,10 @@ export async function renderButton(container, callback, { theme = 'light' } = {}
       auto_select: false,
       context: 'signin',
       itp_support: true,
+      // Chrome/Edge show the browser's own account chooser (FedCM) instead of a popup window, which avoids
+      // popups that hang after "Continue" when the popup cannot message back; other browsers keep the popup.
+      use_fedcm_for_button: true,
+      use_fedcm_for_prompt: true,
     });
     initialized = true;
   }
