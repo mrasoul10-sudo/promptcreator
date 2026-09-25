@@ -8,7 +8,7 @@
 //        body: { source, type, lang, detail }
 
 import {
-  SYSTEM_PROMPT, OUTPUT_SCHEMA, MAX_SOURCE_LENGTH, buildUserMessage, normalizeOptions, parseResult,
+  SYSTEM_PROMPT, OUTPUT_SCHEMA, MAX_SOURCE_LENGTH, ECHO_RETRY_NOTE, buildUserMessage, normalizeOptions, parseResult, isEcho,
 } from '../../assets/js/prompt-spec.js';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -91,13 +91,14 @@ class UpstreamError extends Error {
   }
 }
 
-async function callGemini(env, model, source, options) {
+async function callGemini(env, model, source, options, retryNote = '') {
+  const userText = buildUserMessage(source, options) + (retryNote ? `\n\n${retryNote}` : '');
   const res = await fetch(`${GEMINI_BASE}/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      contents: [{ role: 'user', parts: [{ text: buildUserMessage(source, options) }] }],
+      contents: [{ role: 'user', parts: [{ text: userText }] }],
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: RESPONSE_SCHEMA,
@@ -171,7 +172,11 @@ async function handleGenerate(request, env, origin) {
   let lastError;
   for (const model of models) {
     try {
-      const out = await callGemini(env, model, source, options);
+      let out = await callGemini(env, model, source, options);
+      if (isEcho(source, out.result)) {
+        // The model mostly repeated the input; ask once more, explicitly. Keep the first answer if that fails.
+        out = await callGemini(env, model, source, options, ECHO_RETRY_NOTE).catch(() => out);
+      }
       return json({ ...out, remaining: quota.remaining }, 200, origin);
     } catch (err) {
       lastError = err;

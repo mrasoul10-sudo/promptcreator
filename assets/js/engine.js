@@ -1,12 +1,12 @@
 // Prompt engine: rewrites a rough idea (Persian or English) into a professional prompt.
 // Default: the site's free service (Gemini behind worker/, no key needed). Optional: Claude with the user's own key.
 
-import Anthropic from '../vendor/anthropic-sdk.js?v=202609251054';
-import { FREE_API_URL } from './config.js?v=202609251054';
+import Anthropic from '../vendor/anthropic-sdk.js?v=202609251117';
+import { FREE_API_URL } from './config.js?v=202609251117';
 import {
   TARGETS, LANGS, DETAILS, SYSTEM_PROMPT, OUTPUT_SCHEMA, MAX_SOURCE_LENGTH,
   buildUserMessage, normalizeOptions, parseResult,
-} from './prompt-spec.js?v=202609251054';
+} from './prompt-spec.js?v=202609251117';
 
 export { TARGETS, LANGS, DETAILS };
 
@@ -77,8 +77,17 @@ async function generateFree(text, options, signal) {
   if (!res.ok || !body) {
     throw new EngineError(body?.message || `خطای سرویس (${res.status}). کمی بعد دوباره تلاش کنید.`, body?.error || 'server');
   }
+  // The worker already returns the normalized shape ({promptEn, promptFa, ...}); snake_case is accepted too.
+  const r = body.result || {};
+  const promptEn = options.lang === 'fa' ? '' : String(r.promptEn ?? r.prompt_en ?? '').trim();
+  const promptFa = options.lang === 'en' ? '' : String(r.promptFa ?? r.prompt_fa ?? '').trim();
+  if (!promptEn && !promptFa) throw new EngineError('پاسخی از سرویس دریافت نشد. دوباره تلاش کنید.', 'empty_result');
   return {
-    ...parseResult(JSON.stringify(body.result || {}), options),
+    title: String(r.title || '').trim(),
+    detectedLanguage: r.detectedLanguage || r.detected_language || 'mixed',
+    promptEn,
+    promptFa,
+    notes: Array.isArray(r.notes) ? r.notes.map(String).slice(0, 6) : [],
     model: String(body.model || 'gemini'),
     usage: body.usage || null,
     remaining: Number.isFinite(body.remaining) ? body.remaining : null,

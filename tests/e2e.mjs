@@ -48,7 +48,10 @@ await context.route(`${FREE_API}/**`, async (route) => {
   const body = JSON.parse(req.postData());
   freeRequests.push(body);
   freeRemaining -= 1;
-  return route.fulfill({ headers: cors, contentType: 'application/json', body: JSON.stringify({ result: mockResult(body.source), model: 'gemini-flash', usage: { input: 1, output: 1 }, remaining: freeRemaining }) });
+  // Same shape the real worker returns (normalized camelCase result).
+  const m = mockResult(body.source);
+  const result = { title: m.title, detectedLanguage: m.detected_language, promptEn: body.lang === 'fa' ? '' : m.prompt_en, promptFa: body.lang === 'en' ? '' : m.prompt_fa, notes: m.notes };
+  return route.fulfill({ headers: cors, contentType: 'application/json', body: JSON.stringify({ result, model: 'gemini-flash', usage: { input: 1, output: 1 }, remaining: freeRemaining }) });
 });
 const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const idToken = `${b64url({ alg: 'none' })}.${b64url({ iss: 'https://accounts.google.com', aud: GOOGLE_ID, sub: 'g-123', email: 'maryam@gmail.com', email_verified: true, name: 'مریم گوگلی', exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
@@ -93,11 +96,15 @@ function mockResult(text) {
 const step = (name) => console.log(`• ${name}`);
 
 // Guest home: writing is open, generating asks to sign in
+const SRC = 'یک لوگو برای کافه با رنگ های گرم میخوام';
+const openMenu = async (item) => { await page.click('#user-menu-btn'); await page.click(`.user-menu ${item}`); };
 await page.goto(BASE);
 await page.waitForSelector('#composer');
-assert.ok(await page.isVisible('.hero'), 'guest hero on home page');
+assert.ok(await page.isVisible('.empty-hero'), 'composer-first home page for guests');
+assert.ok(await page.isVisible('.topbar [data-login="login"]'), 'login button in the top bar');
 assert.ok(!(await page.isVisible('#auth-form')), 'no login form up front');
-await page.fill('#source', 'یک لوگو برای کافه با رنگ های گرم میخوام');
+assert.ok(await page.isDisabled('#generate-btn'), 'send is disabled while empty');
+await page.fill('#source', SRC);
 await page.click('#generate-btn');
 await page.waitForSelector('.modal #auth-form');
 step('guest can write on home; generate opens sign-in dialog');
@@ -105,41 +112,51 @@ step('guest can write on home; generate opens sign-in dialog');
 // Protected page as guest opens the dialog too
 await page.keyboard.press('Escape');
 await page.waitForSelector('.modal-backdrop', { state: 'detached' });
-await page.click('a.nav-link[href="#/archive"]');
+await page.click('.sb-nav a[href="#/archive"]');
 await page.waitForSelector('.modal #auth-form');
 assert.match(page.url(), /#\/studio/);
 
-// Register inside the dialog
-await page.click('.auth-tabs .tab[data-mode=register]');
-await page.fill('#auth-form input[name=name]', 'رسول تست');
+// Email-first sign-up inside the dialog
 await page.fill('#auth-form input[name=email]', 'Test@Example.com');
+await page.click('#auth-form button[type=submit]');
+await page.waitForSelector('#auth-form input[name=name]:visible');
+assert.equal(await page.textContent('#auth-email-text'), 'test@example.com');
+await page.fill('#auth-form input[name=name]', 'رسول تست');
 await page.fill('#auth-form input[name=password]', 'secret123');
 await page.click('#auth-form button[type=submit]');
 await page.waitForSelector('.recovery-code');
 const recoveryCode = (await page.textContent('.recovery-code')).trim();
 assert.match(recoveryCode, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
 await page.click('.modal-foot button:has-text("ذخیره کردم")');
-await page.waitForSelector('.prompt-card, .empty');
+await page.waitForSelector('#filters');
 assert.match(page.url(), /#\/archive/, 'returns to the page that asked for sign-in');
-await page.click('a.nav-link[href="#/studio"]');
+await page.click('.tb-title');
 await page.waitForSelector('#composer');
-assert.equal(await page.inputValue('#source'), 'یک لوگو برای کافه با رنگ های گرم میخوام', 'draft kept');
+assert.equal(await page.inputValue('#source'), SRC, 'draft kept');
 assert.ok(!(await page.isVisible('.banner')), 'free engine needs no API key');
-step('registered in dialog, got recovery code, returned to archive, draft kept');
+step('email-first sign-up, recovery code, returned to archive, draft kept');
 
-// Free engine (default): no key, quota shown and updated
+// Free engine (default): no key, quota shown and updated, chat-style thread
 await page.waitForSelector('#quota-note:has-text("۲۰")');
 await page.click('#generate-btn');
-await page.waitForSelector('.result .prompt-block[data-lang=fa]');
+await page.waitForSelector('.msg-bot .prompt-block[data-lang=fa]:visible');
+assert.equal(await page.textContent('.msg-user .bubble'), SRC);
 assert.equal(freeRequests.length, 1);
-assert.equal(freeRequests[0].source, 'یک لوگو برای کافه با رنگ های گرم میخوام');
+assert.equal(freeRequests[0].source, SRC);
+assert.equal(freeRequests[0].type, 'auto', 'default prompt type is auto');
 assert.deepEqual(Object.keys(freeRequests[0]).sort(), ['detail', 'lang', 'source', 'type']);
 assert.equal(requests.length, 0, 'no Claude call on the free engine');
+assert.match(await page.textContent('.msg-bot .prompt-block[data-lang=fa] .prompt-text'), /طراح ارشد برند/, 'free result is displayed');
+await page.click('.tab[data-tab=en]');
+assert.match(await page.textContent('.msg-bot .prompt-block[data-lang=en] .prompt-text'), /senior brand designer/);
 await page.waitForSelector('#quota-note:has-text("۱۹")');
-step('free engine: generated without API key, quota updated');
+assert.match(page.url(), /#\/studio\?p=/, 'thread is bookmarkable');
+await page.waitForSelector('.sb-link.active');
+step('free engine: generated without API key, result shown in thread, quota updated');
 
 // Settings: switch to Claude with own key (bad key then good key)
-await page.click('a.nav-link[href="#/settings"]');
+await openMenu('a[href="#/settings"]');
+await page.waitForSelector('#engine-choice');
 assert.ok(!(await page.isVisible('#api-key')), 'Claude fields hidden on the free engine');
 await page.click('#engine-choice label.seg:has(input[value=claude])');
 await page.fill('#api-key', 'sk-ant-wrong');
@@ -151,13 +168,14 @@ await page.waitForSelector('.toast-success');
 await page.click('#api-form button[type=submit]');
 step('API key tested and saved');
 
-// Generate
-await page.click('a.nav-link[href="#/studio"]');
-await page.fill('#source', 'یک لوگو برای کافه با رنگ های گرم میخوام');
-await page.click('label.seg:has(input[value=image])');
+// Generate with Claude
+await page.click('#sb-new');
+await page.waitForSelector('.empty-hero:visible');
+await page.fill('#source', SRC);
+await page.selectOption('#composer select[name=type]', 'image');
 await page.click('#generate-btn');
-await page.waitForSelector('.loading-card');
-await page.waitForSelector('.result .prompt-block[data-lang=en]');
+await page.waitForSelector('.msg-bot .thinking');
+await page.waitForSelector('.msg-bot .prompt-block[data-lang=fa]:visible');
 const req = requests.at(-1);
 assert.equal(req.body.model, 'claude-opus-5');
 assert.equal(req.body.fallbacks, 'default');
@@ -166,9 +184,10 @@ assert.equal(req.body.output_config.format.type, 'json_schema');
 assert.equal(req.body.output_config.effort, 'medium');
 assert.equal(req.body.stream, true);
 assert.match(req.body.messages[0].content, /Prompt type: image/);
+assert.match(req.body.system, /never a copy/);
 assert.ok(req.headers['anthropic-dangerous-direct-browser-access']);
-assert.equal(await page.textContent('.result h2'), 'لوگوی مینیمال کافه');
-step('prompt generated (request shape verified)');
+assert.equal(await page.textContent('.result-title'), 'لوگوی مینیمال کافه');
+step('prompt generated with Claude (request shape verified)');
 
 // Archive it
 await page.click('#archive-btn');
@@ -176,29 +195,33 @@ await page.fill('#archive-form input[name=category]', 'طراحی');
 await page.fill('#archive-form input[name=tags]', 'لوگو, کافه');
 await page.fill('#archive-form textarea[name=notes]', 'برای مشتری');
 await page.click('.modal-foot button:has-text("ذخیره")');
-await page.waitForSelector('#archive-btn.btn-soft');
+await page.waitForSelector('#archive-btn.on');
 step('saved to archive with folder and tags');
 
-// Second generation (stays history-only)
+// Second generation from the thread (stays history-only)
 await page.fill('#source', 'write a python script to rename files');
-await page.click('label.seg:has(input[value=coding])');
-await page.click('label.seg:has(input[value=en])');
+await page.selectOption('#composer select[name=type]', 'coding');
+await page.selectOption('#composer select[name=lang]', 'en');
 await page.click('#generate-btn');
-await page.waitForFunction(() => document.querySelectorAll('.result .prompt-block').length === 1);
+await page.waitForFunction(() => {
+  const blocks = document.querySelectorAll('.msg-bot .prompt-block');
+  return blocks.length === 1 && blocks[0].dataset.lang === 'en';
+});
 assert.equal(requests.at(-1).body.messages[0].content.includes('English only'), true);
+assert.equal(await page.locator('.sb-link').count(), 3, 'sidebar lists recent prompts');
 
-// History
-await page.click('a.nav-link[href="#/history"]');
+// History (search page)
+await page.click('.sb-nav a[href="#/history"]');
 await page.waitForSelector('.prompt-card');
 assert.equal(await page.locator('.prompt-card').count(), 3);
 await page.fill('#history-q', 'python');
 await page.waitForFunction(() => document.querySelectorAll('.prompt-card').length === 1);
 await page.fill('#history-q', 'كافه'); // Arabic kaf must still match Persian "کافه"
 await page.waitForFunction(() => document.querySelectorAll('.prompt-card').length === 2);
-step('history lists both, folded Persian search works');
+step('history lists all, folded Persian search works');
 
 // Archive search & filters
-await page.click('a.nav-link[href="#/archive"]');
+await page.click('.sb-nav a[href="#/archive"]');
 await page.waitForSelector('#filters');
 await page.waitForSelector('#archive-list .prompt-card');
 assert.equal(await page.locator('.prompt-card').count(), 1);
@@ -215,6 +238,10 @@ assert.match(page.url(), /tag=/);
 await page.click('#toggle-advanced');
 await page.selectOption('#filters select[name=type]', 'coding');
 await page.waitForSelector('.empty');
+await page.selectOption('#filters select[name=type]', '');
+await page.selectOption('#filters select[name=range]', 'today');
+await page.waitForSelector('#archive-list .prompt-card');
+assert.match(page.url(), /range=today/);
 await page.click('#reset-filters');
 await page.waitForSelector('.prompt-card');
 step('archive keyword, tag and type filters work');
@@ -226,8 +253,12 @@ await page.waitForSelector('.modal .detail');
 await page.keyboard.press('Escape');
 await page.waitForSelector('.modal-backdrop', { state: 'detached' });
 
+// Sidebar link reopens a saved thread
+await page.click('.sb-link >> nth=0');
+await page.waitForSelector('.msg-bot .result-title');
+
 // Profile: avatar upload + password change
-await page.click('.user-chip');
+await openMenu('a[href="#/profile"]');
 await page.waitForSelector('#avatar-input', { state: 'attached' });
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 await page.setInputFiles('#avatar-input', { name: 'a.png', mimeType: 'image/png', buffer: png });
@@ -238,11 +269,14 @@ await page.click('#password-form button');
 await page.waitForSelector('.toast-success:has-text("رمز")');
 step('avatar uploaded, password changed');
 
-// Logout / login with new password persists data
+// Logout / email-first login with new password; data persists
 await page.click('#logout-btn');
-await page.waitForSelector('.hero');
+await page.waitForSelector('.empty-hero');
 await page.click('.sidebar [data-login]');
 await page.fill('#auth-form input[name=email]', 'test@example.com');
+await page.click('#auth-form button[type=submit]');
+await page.waitForSelector('#auth-form input[name=password]:visible');
+assert.ok(!(await page.isVisible('#auth-form input[name=name]')), 'existing account goes to the password step');
 await page.fill('#auth-form input[name=password]', 'secret123');
 await page.click('#auth-form button[type=submit]');
 await page.waitForSelector('.form-error:not([hidden])');
@@ -254,11 +288,11 @@ await page.waitForSelector('.prompt-card');
 step('logout/login with new password; still signed in after reload');
 
 // Forgot password with the recovery code
-await page.click('.user-chip');
-await page.click('#logout-btn');
+await openMenu('[data-act=logout]');
 await page.click('.sidebar [data-login]');
-await page.click('#forgot-link');
 await page.fill('#auth-form input[name=email]', 'test@example.com');
+await page.click('#auth-form button[type=submit]');
+await page.click('#forgot-link');
 await page.fill('#auth-form input[name=code]', 'AAAA-BBBB-CCCC');
 await page.fill('#auth-form input[name=password]', 'newpass789');
 await page.click('#auth-form button[type=submit]');
@@ -269,30 +303,37 @@ await page.waitForSelector('.recovery-code');
 const newCode = (await page.textContent('.recovery-code')).trim();
 assert.notEqual(newCode, recoveryCode, 'recovery code rotates after use');
 await page.click('.modal-foot button:has-text("ذخیره کردم")');
-await page.waitForSelector('.user-chip');
+await page.waitForSelector('#user-menu-btn');
 step('forgot password: wrong code rejected, right code resets and signs in');
 
 // Google sign-in creates a separate account
-await page.click('.user-chip');
-await page.click('#logout-btn');
-await page.click('.sidebar [data-login]');
+await openMenu('[data-act=logout]');
+await page.click('.topbar [data-login="login"]');
 await page.click('#gsi-stub');
-await page.waitForSelector('.user-chip:has-text("مریم گوگلی")');
-await page.click('.user-chip');
+await page.waitForSelector('#user-menu-btn:has-text("مریم گوگلی")');
+await openMenu('a[href="#/profile"]');
 await page.waitForSelector('#password-form');
 assert.equal(await page.locator('#password-form input[name=old]').count(), 0, 'Google account sets a password without an old one');
 assert.equal(await page.textContent('.stats strong'), '۰', 'Google account starts empty');
 step('Google sign-in works and creates its own account');
 
-// Mobile layout
+// Mobile layout: drawer sidebar
 await page.setViewportSize({ width: 390, height: 800 });
 await page.goto(`${BASE}#/studio`);
 await page.waitForSelector('#composer');
-assert.ok(await page.isVisible('.bottom-nav'));
-assert.ok(!(await page.isVisible('.sidebar')));
+await page.waitForTimeout(400); // let the sidebar finish sliding off-canvas after the resize
+assert.ok(await page.isVisible('.tb-menu'), 'menu button on mobile');
+const offscreen = async () => page.evaluate(() => { const r = document.querySelector('.sidebar').getBoundingClientRect(); return r.left >= window.innerWidth - 1 || r.right <= 1; });
+assert.ok(await offscreen(), 'sidebar hidden off-canvas');
+await page.click('.tb-menu');
+await page.waitForFunction(() => document.body.classList.contains('drawer-open'));
+await page.waitForTimeout(350);
+assert.ok(!(await offscreen()), 'drawer opens');
+await page.click('#scrim', { position: { x: 20, y: 400 } });
+await page.waitForFunction(() => !document.body.classList.contains('drawer-open'));
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
 assert.equal(overflow, false, 'no horizontal scroll on mobile');
-step('mobile layout: bottom nav, no horizontal overflow');
+step('mobile layout: drawer sidebar, no horizontal overflow');
 
 assert.deepEqual(errors, [], `page errors: ${errors.join('\n')}`);
 await browser.close();

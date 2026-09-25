@@ -33,6 +33,10 @@ globalThis.fetch = async (url, init) => {
     return Response.json({ error: { code: 429, message: 'Resource exhausted' } }, { status: 429 });
   }
   if (geminiMode === 'down') return Response.json({ error: { message: 'boom' } }, { status: 500 });
+  if (geminiMode === 'echo' && !body.contents[0].parts[0].text.includes('repeated the input')) {
+    const src = body.contents[0].parts[0].text.split('<input>\n')[1].split('\n</input>')[0];
+    return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ title: 't', detected_language: 'fa', prompt_en: '', prompt_fa: src, notes: [] }) }] }, finishReason: 'STOP' }] });
+  }
   const out = {
     title: 'لوگوی کافه',
     detected_language: 'fa',
@@ -132,6 +136,19 @@ const call = async (...args) => {
   assert.equal(body.detail, 'boom', 'upstream error text is exposed for diagnosis');
   const after = (await call('/quota', { method: 'GET', ip: '9.9.9.9' })).body.remaining;
   assert.equal(after, before, 'failed call does not use quota');
+  geminiMode = 'ok';
+}
+
+// Echo detection: a copy of the input triggers one retry with the stronger instruction
+{
+  geminiMode = 'echo';
+  const before = calls.length;
+  const src = 'مانده برنامه کل برنامه اینها به عدد نوشتن کار خوبی نیست چرا نباید مثلا تعداد باربیکیو اروپایی را با نظم دهنده جمع بست';
+  const { res, body } = await call('/generate', { ip: '8.8.8.8', body: { source: src } });
+  assert.equal(res.status, 200);
+  assert.equal(calls.length - before, 2, 'echo triggers exactly one retry');
+  assert.match(calls.at(-1).body.contents[0].parts[0].text, /repeated the input/);
+  assert.notEqual(body.result.promptFa, src);
   geminiMode = 'ok';
 }
 

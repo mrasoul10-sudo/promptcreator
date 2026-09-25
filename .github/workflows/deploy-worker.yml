@@ -118,3 +118,10 @@ jobs:
           head -c 3000 /tmp/out.json; echo
           if [ "$code" != "200" ]; then echo "::error::Live /generate returned HTTP $code"; exit 1; fi
           node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/out.json","utf8")).result; if(!r.promptEn||!r.promptFa){console.error("empty prompt");process.exit(1)}'
+          # Quality sample: an informal Persian change request must come back restructured, not echoed.
+          curl -sS -o /tmp/q.json -X POST "$URL/generate" \
+            -H 'content-type: application/json' -H 'origin: https://mrasoul10-sudo.github.io' \
+            --data-binary @- <<'JSON'
+          {"source":"مانده برنامه کل برنامه اینها به عدد نوشتن کار خوبی نیست چرا ؟ نباید مثلا تعداد باربیکیو اروپایی را با نظم دهنده جمع بست . هرکدام 2 محصول مجزا هستند و هیچ ارتباطی به یکدیگر ندارند . بخش فیلترها و تایتل بلوک دو خطی شده . فیلترها در یک خط سمت راست و دکمه های پرینت سمت چپ باشند","type":"auto","lang":"both","detail":"balanced"}
+          JSON
+          node -e 'const b=JSON.parse(require("fs").readFileSync("/tmp/q.json","utf8")); console.log("model:", b.model); console.log(b.result ? "--- FA ---\n"+b.result.promptFa+"\n--- EN ---\n"+b.result.promptEn : JSON.stringify(b))'

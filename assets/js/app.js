@@ -1,26 +1,38 @@
-// Prompt Creator — single-page app shell, hash router and views.
+// Prompt Creator (پرامپت‌ساز) — single-page app shell, hash router and views. Layout follows a chat-app pattern:
+// a sidebar with recent prompts, a top bar, and a composer-first home page.
 
-import * as auth from './auth.js?v=202609251054';
-import * as prompts from './prompts.js?v=202609251054';
-import * as engine from './engine.js?v=202609251054';
-import * as google from './google.js?v=202609251054';
+import * as auth from './auth.js?v=202609251117';
+import * as prompts from './prompts.js?v=202609251117';
+import * as engine from './engine.js?v=202609251117';
+import * as google from './google.js?v=202609251117';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download,
-} from './ui.js?v=202609251054';
+} from './ui.js?v=202609251117';
 
+const APP_NAME = 'پرامپت‌ساز';
 const view = $('#view');
 const DRAFT_KEY = 'pc.draft';
 const THEME_KEY = 'pc.theme';
+const SIDEBAR_KEY = 'pc.sidebar';
+const mobileQuery = matchMedia('(max-width: 860px)');
 
 // Studio state survives navigation within the session.
 const studio = {
-  result: null, // saved prompt record of the latest generation
+  result: null, // saved prompt record shown in the thread
+  pending: null, // { source } while a generation runs
   busy: false,
   controller: null,
   startedAt: 0,
   timer: null,
 };
+
+const EXAMPLES = [
+  { type: 'image', text: 'یک لوگوی مینیمال برای کافه با رنگ‌های گرم' },
+  { type: 'coding', text: 'یک صفحه ورود ساده با React و اعتبارسنجی فرم می‌خواهم' },
+  { type: 'writing', text: 'یک متن معرفی کوتاه برای صفحه اینستاگرام فروشگاه لباس' },
+  { type: 'video', text: 'ویدیوی کوتاه از طلوع آفتاب روی کوه‌های البرز با حرکت آرام دوربین' },
+];
 
 // ---------- Theme ----------
 
@@ -40,7 +52,6 @@ function toggleTheme() {
   const next = currentTheme() === 'dark' ? 'light' : 'dark';
   applyTheme(next);
   try { localStorage.setItem(THEME_KEY, next); } catch { /* ignore */ }
-  renderChrome();
 }
 
 try { applyTheme(localStorage.getItem(THEME_KEY)); } catch { /* ignore */ }
@@ -49,15 +60,15 @@ try { applyTheme(localStorage.getItem(THEME_KEY)); } catch { /* ignore */ }
 
 // Every page except the studio needs an account; the studio (home) is open to guests.
 const ROUTES = {
-  '/studio': { render: renderStudio, title: 'ساخت پرامپت', auth: false },
-  '/history': { render: renderHistory, title: 'تاریخچه', auth: true },
+  '/studio': { render: renderStudio, title: 'پرامپت جدید', auth: false },
+  '/history': { render: renderHistory, title: 'جستجوی پرامپت‌ها', auth: true },
   '/archive': { render: renderArchive, title: 'آرشیو', auth: true },
   '/profile': { render: renderProfile, title: 'حساب کاربری', auth: true },
   '/settings': { render: renderSettings, title: 'تنظیمات', auth: true },
 };
 
 const AUTH_REASONS = {
-  '/history': 'برای دیدن تاریخچه پرامپت‌هایتان وارد شوید.',
+  '/history': 'برای دیدن پرامپت‌های قبلی‌تان وارد شوید.',
   '/archive': 'برای دسترسی به آرشیو وارد شوید.',
   '/profile': 'برای مدیریت حساب کاربری وارد شوید.',
   '/settings': 'برای تنظیمات وارد شوید.',
@@ -80,11 +91,12 @@ async function route() {
   let target = ROUTES[path] ? path : '/studio';
   const blocked = ROUTES[target].auth && !user;
   if (blocked) target = '/studio';
-  if (target !== path) {
-    history.replaceState(null, '', `#${target}`);
-  }
-  document.title = `${ROUTES[target].title} · Prompt Creator`;
-  renderChrome(target);
+  if (target !== path) history.replaceState(null, '', `#${target}`);
+  document.title = `${ROUTES[target].title} · ${APP_NAME}`;
+  document.body.dataset.page = target.slice(1);
+  closeDrawer();
+  renderTopbar();
+  renderSidebar();
   view.classList.remove('view-enter');
   void view.offsetWidth; // restart the enter animation
   view.classList.add('view-enter');
@@ -94,8 +106,7 @@ async function route() {
     console.error(err);
     view.innerHTML = `<div class="empty">${icon('info', 'icon-lg')}<p>${esc(err.message || 'خطا در نمایش صفحه')}</p></div>`;
   }
-  view.focus({ preventScroll: true });
-  window.scrollTo({ top: 0 });
+  if (target !== '/studio') window.scrollTo({ top: 0 });
   if (blocked && ROUTES[path]) {
     if (await openAuthModal({ reason: AUTH_REASONS[path] })) navigate(path);
   }
@@ -103,51 +114,178 @@ async function route() {
 
 window.addEventListener('hashchange', route);
 
-// ---------- Chrome (sidebar, mobile nav) ----------
-
-const NAV = [
-  { path: '/studio', label: 'ساخت پرامپت', short: 'ساخت', icon: 'sparkles' },
-  { path: '/history', label: 'تاریخچه', icon: 'history' },
-  { path: '/archive', label: 'آرشیو', icon: 'archive' },
-  { path: '/settings', label: 'تنظیمات', icon: 'settings' },
-];
-
-function renderChrome(active = parseHash().path) {
-  const user = auth.currentUser();
-  const sidebar = $('#sidebar');
-  const bottom = $('#bottom-nav');
-  const links = NAV.map((n) => `
-    <a href="#${n.path}" class="nav-link ${active === n.path ? 'active' : ''}" ${active === n.path ? 'aria-current="page"' : ''}>
-      ${icon(n.icon)}<span>${n.label}</span>
-    </a>`).join('');
-  const account = user
-    ? `<a href="#/profile" class="user-chip ${active === '/profile' ? 'active' : ''}">
-        ${avatarHtml(user, 'sm')}
-        <span class="user-meta"><strong>${esc(user.name)}</strong><small>${esc(user.email)}</small></span>
-      </a>`
-    : `<button class="btn btn-primary btn-block" data-login>${icon('user')}<span>ورود / ثبت‌نام</span></button>`;
-  sidebar.innerHTML = `
-    <a class="brand" href="#/studio" aria-label="Prompt Creator">
-      <span class="brand-mark">${icon('wand')}</span>
-      <span class="brand-text">Prompt Creator<small>سازنده پرامپت حرفه‌ای</small></span>
-    </a>
-    <nav class="nav" aria-label="منوی اصلی">${links}</nav>
-    <div class="sidebar-foot">
-      <button class="icon-btn" id="theme-toggle" aria-label="تغییر تم" title="تغییر تم">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}</button>
-      ${account}
-    </div>`;
-  bottom.innerHTML = `${NAV.map((n) => `
-    <a href="#${n.path}" class="${active === n.path ? 'active' : ''}" aria-label="${n.label}">${icon(n.icon)}<span>${n.short || n.label}</span></a>`).join('')}
-    ${user
-      ? `<a href="#/profile" class="${active === '/profile' ? 'active' : ''}" aria-label="حساب کاربری">${avatarHtml(user, 'xs')}<span>حساب</span></a>`
-      : `<button type="button" data-login aria-label="ورود">${icon('user')}<span>ورود</span></button>`}`;
-  $('#theme-toggle').addEventListener('click', toggleTheme);
-  $$('[data-login]').forEach((b) => b.addEventListener('click', () => openAuthModal()));
-  paintAvatars(sidebar);
-  paintAvatars(bottom);
+/** Keeps query parameters in the URL (bookmarkable) without triggering a re-route. */
+function syncQuery(values) {
+  const { path } = parseHash();
+  const params = new URLSearchParams();
+  Object.entries(values).forEach(([k, v]) => { if (v) params.set(k, v); });
+  const qs = params.toString();
+  history.replaceState(null, '', `#${path}${qs ? `?${qs}` : ''}`);
 }
 
-// ---------- Auth modal ----------
+// ---------- Sidebar & top bar ----------
+
+function sidebarOpen() {
+  return mobileQuery.matches ? document.body.classList.contains('drawer-open') : !document.body.classList.contains('sidebar-closed');
+}
+
+function toggleSidebar() {
+  if (mobileQuery.matches) {
+    document.body.classList.toggle('drawer-open');
+    return;
+  }
+  const closed = document.body.classList.toggle('sidebar-closed');
+  try { localStorage.setItem(SIDEBAR_KEY, closed ? 'closed' : 'open'); } catch { /* ignore */ }
+}
+
+function closeDrawer() {
+  document.body.classList.remove('drawer-open');
+}
+
+try { if (localStorage.getItem(SIDEBAR_KEY) === 'closed') document.body.classList.add('sidebar-closed'); } catch { /* ignore */ }
+$('#scrim').addEventListener('click', closeDrawer);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+
+function newPrompt() {
+  if (studio.busy) studio.controller?.abort();
+  studio.result = null;
+  saveDraft(null);
+  if (parseHash().path === '/studio' && !parseHash().params.get('p')) route();
+  else navigate('/studio');
+}
+
+function groupLabel(ts) {
+  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((start(new Date()) - start(new Date(ts))) / 86400000);
+  if (days === 0) return 'امروز';
+  if (days === 1) return 'دیروز';
+  if (days < 7) return '۷ روز گذشته';
+  if (days < 30) return '۳۰ روز گذشته';
+  return 'قدیمی‌تر';
+}
+
+async function renderSidebar() {
+  const user = auth.currentUser();
+  const sidebar = $('#sidebar');
+  const active = parseHash().path;
+  sidebar.innerHTML = `
+    <div class="sb-head">
+      <a class="brand" href="#/studio" aria-label="${APP_NAME}">
+        <span class="brand-mark">${icon('wand')}</span><span class="brand-name">${APP_NAME}</span>
+      </a>
+      <button class="icon-btn" data-toggle-sidebar aria-label="بستن منو" title="بستن منو">${icon('sidebar')}</button>
+    </div>
+    <nav class="sb-nav" aria-label="منوی اصلی">
+      <button class="sb-item" id="sb-new">${icon('edit')}<span>پرامپت جدید</span></button>
+      <a class="sb-item ${active === '/history' ? 'active' : ''}" href="#/history">${icon('search')}<span>جستجوی پرامپت‌ها</span></a>
+      <a class="sb-item ${active === '/archive' ? 'active' : ''}" href="#/archive">${icon('archive')}<span>آرشیو</span></a>
+    </nav>
+    <div class="sb-recent" id="sb-recent">
+      ${user ? '' : `
+        <div class="sb-guest">
+          <strong>پرامپت‌هایتان را ذخیره کنید</strong>
+          <p>وارد شوید تا تاریخچه و آرشیو پرامپت‌هایتان همیشه در دسترس باشد.</p>
+          <button class="btn btn-primary btn-block btn-sm" data-login="login">ورود</button>
+        </div>`}
+    </div>
+    <div class="sb-foot">
+      ${user ? `
+        <button class="sb-user" id="user-menu-btn" aria-haspopup="menu" aria-expanded="false">
+          ${avatarHtml(user, 'sm')}
+          <span class="user-meta"><strong>${esc(user.name)}</strong><small>${esc(user.email)}</small></span>
+        </button>` : `
+        <button class="sb-item" data-theme-toggle>${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}<span>${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}</span></button>`}
+    </div>`;
+  paintAvatars(sidebar);
+  $('#sb-new').addEventListener('click', newPrompt);
+  $$('[data-toggle-sidebar]', sidebar).forEach((b) => b.addEventListener('click', toggleSidebar));
+  $$('[data-login]', sidebar).forEach((b) => b.addEventListener('click', () => openAuthModal({ mode: b.dataset.login })));
+  $$('[data-theme-toggle]', sidebar).forEach((b) => b.addEventListener('click', () => { toggleTheme(); renderSidebar(); }));
+  $('#user-menu-btn')?.addEventListener('click', (e) => openUserMenu(e.currentTarget));
+  if (user) fillRecent(user);
+}
+
+async function fillRecent(user) {
+  const box = $('#sb-recent');
+  if (!box) return;
+  const rows = (await prompts.listForUser(user.id)).slice(0, 40);
+  if (!$('#sb-recent') || auth.currentUser()?.id !== user.id) return;
+  if (!rows.length) {
+    box.innerHTML = '<p class="sb-empty">پرامپت‌هایی که می‌سازید اینجا نمایش داده می‌شوند.</p>';
+    return;
+  }
+  const currentId = parseHash().path === '/studio' ? studio.result?.id : null;
+  const groups = new Map();
+  for (const r of rows) {
+    const label = groupLabel(r.createdAt);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(r);
+  }
+  box.innerHTML = [...groups.entries()].map(([label, items]) => `
+    <div class="sb-group">
+      <h3>${esc(label)}</h3>
+      ${items.map((r) => `
+        <a class="sb-link ${r.id === currentId ? 'active' : ''}" href="#/studio?p=${encodeURIComponent(r.id)}" title="${esc(r.title || r.source)}">
+          <span dir="auto">${esc(truncate(r.title || r.source, 42))}</span>
+          ${r.archived ? icon('archive', 'sb-flag') : ''}
+        </a>`).join('')}
+    </div>`).join('');
+}
+
+function openUserMenu(anchor) {
+  const existing = $('.user-menu');
+  if (existing) { existing.remove(); anchor.setAttribute('aria-expanded', 'false'); return; }
+  const user = auth.currentUser();
+  const menu = document.createElement('div');
+  menu.className = 'user-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = `
+    <div class="user-menu-head"><span dir="ltr">${esc(user.email)}</span></div>
+    <a role="menuitem" href="#/profile">${icon('user')}<span>حساب کاربری</span></a>
+    <a role="menuitem" href="#/settings">${icon('settings')}<span>تنظیمات</span></a>
+    <button role="menuitem" data-act="theme">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}<span>${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}</span></button>
+    <hr>
+    <button role="menuitem" data-act="logout">${icon('logout')}<span>خروج</span></button>`;
+  anchor.after(menu);
+  anchor.setAttribute('aria-expanded', 'true');
+  const close = () => { menu.remove(); anchor.setAttribute('aria-expanded', 'false'); document.removeEventListener('mousedown', outside); };
+  const outside = (e) => { if (!menu.contains(e.target) && !anchor.contains(e.target)) close(); };
+  setTimeout(() => document.addEventListener('mousedown', outside));
+  menu.addEventListener('click', (e) => {
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'theme') { toggleTheme(); close(); renderSidebar(); return; }
+    if (act === 'logout') { close(); logout(); return; }
+    if (e.target.closest('a')) close();
+  });
+}
+
+function logout() {
+  auth.logout();
+  studio.result = null;
+  toast('از حساب خارج شدید');
+  navigate('/studio');
+}
+
+function renderTopbar() {
+  const user = auth.currentUser();
+  const bar = $('#topbar');
+  bar.innerHTML = `
+    <div class="tb-start">
+      <button class="icon-btn tb-menu" data-toggle-sidebar aria-label="باز کردن منو" title="منو">${icon('sidebar')}</button>
+      <a class="tb-title" href="#/studio">${APP_NAME}</a>
+    </div>
+    <div class="tb-end">
+      ${user ? '' : `
+        <button class="btn btn-primary btn-pill btn-sm" data-login="login">ورود</button>
+        <button class="btn btn-outline btn-pill btn-sm tb-signup" data-login="register">ثبت‌نام رایگان</button>`}
+      <button class="icon-btn tb-new" aria-label="پرامپت جدید" title="پرامپت جدید">${icon('edit')}</button>
+    </div>`;
+  $$('[data-toggle-sidebar]', bar).forEach((b) => b.addEventListener('click', toggleSidebar));
+  $$('[data-login]', bar).forEach((b) => b.addEventListener('click', () => openAuthModal({ mode: b.dataset.login })));
+  $('.tb-new', bar).addEventListener('click', newPrompt);
+}
+
+// ---------- Auth dialog ----------
 
 let authOpen = null;
 
@@ -166,59 +304,66 @@ function showRecoveryCode(code, { fresh = true } = {}) {
     actions: [{ label: 'ذخیره کردم', class: 'btn-primary', value: true }],
     onMount: (root) => {
       $('#copy-code', root).addEventListener('click', (e) => copyText(code, e.currentTarget));
-      $('#save-code', root).addEventListener('click', () => download('promptcreator-recovery-code.txt', `Prompt Creator\n${auth.currentUser()?.email || ''}\nRecovery code: ${code}\n`, 'text/plain'));
+      $('#save-code', root).addEventListener('click', () => download('promptcreator-recovery-code.txt', `${APP_NAME}\n${auth.currentUser()?.email || ''}\nکد بازیابی: ${code}\n`, 'text/plain'));
     },
   });
 }
 
 /**
- * Opens the sign-in / sign-up dialog. Resolves true once the user is signed in, false if dismissed.
- * The current page is re-rendered after a successful sign-in.
+ * Sign-in / sign-up dialog in steps: email first, then password (existing account) or name + password (new account).
+ * Resolves true once the user is signed in, false if dismissed. The current page is re-rendered after sign-in.
  */
 function openAuthModal({ mode = 'login', reason = '' } = {}) {
   if (authOpen) return authOpen;
   let signedIn = false;
   let recoveryCode = null;
   authOpen = modal({
-    title: 'ورود به Prompt Creator',
+    title: mode === 'register' ? 'ساخت حساب رایگان' : 'ورود یا ثبت‌نام',
     size: 'modal-auth',
     body: `
       <div class="auth-dialog">
-        <div class="auth-intro">
-          <span class="brand-mark">${icon('wand')}</span>
-          <p>${esc(reason || 'برای ساخت و ذخیره پرامپت‌ها وارد حساب خود شوید یا در چند ثانیه حساب بسازید.')}</p>
-        </div>
+        <p class="auth-sub">${esc(reason || 'پرامپت‌های حرفه‌ای بسازید و همه را در تاریخچه و آرشیو خودتان نگه دارید.')}</p>
         ${google.enabled() ? `
           <div class="google-slot" id="google-slot"><div class="skeleton google-skeleton"></div></div>
-          <div class="divider"><span>یا با ایمیل</span></div>` : ''}
-        <div class="tabs auth-tabs" role="tablist">
-          <button type="button" role="tab" class="tab ${mode === 'login' ? 'active' : ''}" data-mode="login">ورود</button>
-          <button type="button" role="tab" class="tab ${mode === 'register' ? 'active' : ''}" data-mode="register">ثبت‌نام</button>
-        </div>
+          <div class="divider"><span>یا</span></div>` : ''}
         <form id="auth-form" novalidate>
-          <label class="field" data-only="register"><span>نام</span>
-            <input name="name" autocomplete="name" minlength="2" placeholder="مثلاً رسول"></label>
-          <label class="field"><span>ایمیل</span>
-            <input name="email" type="email" dir="ltr" autocomplete="email" required placeholder="you@example.com"></label>
-          <label class="field" data-only="forgot"><span>کد بازیابی</span>
-            <input name="code" dir="ltr" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX"></label>
-          <label class="field"><span data-label="password">رمز عبور</span>
-            <input name="password" type="password" dir="ltr" autocomplete="current-password" required minlength="6" placeholder="حداقل ۶ کاراکتر"></label>
-          <div class="auth-row">
-            <label class="check"><input type="checkbox" name="remember" checked><span>مرا به خاطر بسپار</span></label>
-            <button type="button" class="link-btn" data-only="login" id="forgot-link">رمز را فراموش کرده‌اید؟</button>
+          <div class="auth-email-chip" data-step="password register" hidden>
+            <span dir="ltr" id="auth-email-text"></span>
+            <button type="button" class="link-btn" id="auth-edit-email">ویرایش</button>
           </div>
-          <p class="auth-hint" data-only="forgot">${icon('info')} کد بازیابی هنگام ثبت‌نام به شما داده شده است. ${google.enabled() ? 'اگر ایمیل حسابتان همان ایمیل گوگل است، می‌توانید با «ادامه با گوگل» وارد شوید و از صفحه حساب کاربری رمز جدید بگذارید.' : ''}</p>
+          <label class="field float" data-step="email forgot">
+            <input name="email" type="email" dir="ltr" autocomplete="email" placeholder=" " required>
+            <span>نشانی ایمیل</span>
+          </label>
+          <label class="field float" data-step="register">
+            <input name="name" autocomplete="name" placeholder=" " minlength="2">
+            <span>نام شما</span>
+          </label>
+          <label class="field float" data-step="forgot">
+            <input name="code" dir="ltr" autocomplete="off" spellcheck="false" placeholder=" ">
+            <span>کد بازیابی</span>
+          </label>
+          <label class="field float" data-step="password register forgot">
+            <input name="password" type="password" dir="ltr" autocomplete="current-password" placeholder=" " minlength="6">
+            <span data-label="password">رمز عبور</span>
+          </label>
+          <div class="auth-row" data-step="password register forgot">
+            <label class="check"><input type="checkbox" name="remember" checked><span>مرا به خاطر بسپار</span></label>
+            <button type="button" class="link-btn" data-step="password" id="forgot-link">فراموشی رمز</button>
+          </div>
+          <p class="auth-hint" data-step="forgot">${icon('info')} <span>کد بازیابی هنگام ثبت‌نام به شما داده شده است.${google.enabled() ? ' اگر ایمیل حسابتان ایمیل گوگل است، با «ادامه با گوگل» وارد شوید و از حساب کاربری رمز جدید بگذارید.' : ''}</span></p>
           <p class="form-error" role="alert" hidden></p>
-          <button class="btn btn-primary btn-block" type="submit"></button>
+          <button class="btn btn-primary btn-block btn-lg btn-pill" type="submit">ادامه</button>
         </form>
-        <p class="auth-note">${icon('info')} <span>حساب و اطلاعات شما فقط در همین مرورگر ذخیره می‌شود. برای انتقال به دستگاه دیگر از «پشتیبان‌گیری» در تنظیمات استفاده کنید. <a href="privacy.html" target="_blank" rel="noopener">حریم خصوصی</a></span></p>
+        <p class="auth-legal">با ادامه، <a href="terms.html" target="_blank" rel="noopener">شرایط استفاده</a> و <a href="privacy.html" target="_blank" rel="noopener">حریم خصوصی</a> را می‌پذیرید. حساب و پرامپت‌ها فقط در همین مرورگر ذخیره می‌شوند.</p>
       </div>`,
     onMount: (root, close) => {
       const form = $('#auth-form', root);
       const errorBox = $('.form-error', form);
       const submit = $('button[type=submit]', form);
-      let current = mode;
+      const title = $('#modal-title', root);
+      const input = (name) => $(`input[name=${name}]`, form);
+      let step = 'email';
 
       const showError = (message) => {
         errorBox.textContent = message;
@@ -232,39 +377,48 @@ function openAuthModal({ mode = 'login', reason = '' } = {}) {
         toast(isNew ? 'حساب شما ساخته شد' : `خوش آمدید ${user.name}`, 'success');
         close(true);
       };
-      const setMode = (m) => {
-        current = m;
-        $$('.auth-tabs .tab', root).forEach((t) => t.classList.toggle('active', t.dataset.mode === m));
-        $$('[data-only]', form).forEach((el) => { el.hidden = el.dataset.only !== m; });
-        $('input[name=name]', form).required = m === 'register';
-        $('input[name=code]', form).required = m === 'forgot';
-        $('input[name=password]', form).autocomplete = m === 'login' ? 'current-password' : 'new-password';
-        $('[data-label=password]', form).textContent = m === 'forgot' ? 'رمز عبور جدید' : 'رمز عبور';
-        submit.textContent = { login: 'ورود', register: 'ساخت حساب', forgot: 'تعیین رمز جدید و ورود' }[m];
+      const setStep = (next) => {
+        step = next;
+        $$('[data-step]', form).forEach((el) => { el.hidden = !el.dataset.step.split(' ').includes(next); });
+        $('#auth-email-text', form).textContent = input('email').value.trim().toLowerCase();
+        input('password').autocomplete = next === 'password' ? 'current-password' : 'new-password';
+        $('[data-label=password]', form).textContent = next === 'forgot' ? 'رمز عبور جدید' : next === 'register' ? 'یک رمز عبور بسازید' : 'رمز عبور';
+        submit.textContent = { email: 'ادامه', password: 'ورود', register: 'ساخت حساب', forgot: 'تعیین رمز جدید و ورود' }[next];
+        title.textContent = { email: 'ورود یا ثبت‌نام', password: 'رمز عبور را وارد کنید', register: 'ساخت حساب رایگان', forgot: 'بازیابی رمز عبور' }[next];
         errorBox.hidden = true;
+        const focus = { email: 'email', password: 'password', register: 'name', forgot: 'code' }[next];
+        setTimeout(() => input(focus)?.focus(), 30);
       };
-      setMode(mode);
-      $$('.auth-tabs .tab', root).forEach((t) => t.addEventListener('click', () => setMode(t.dataset.mode)));
-      $('#forgot-link', form).addEventListener('click', () => setMode('forgot'));
+      setStep('email');
+      $('#auth-edit-email', form).addEventListener('click', () => setStep('email'));
+      $('#forgot-link', form).addEventListener('click', () => setStep('forgot'));
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(form));
+        const payload = { ...data, remember: Boolean(data.remember) };
         errorBox.hidden = true;
         submit.disabled = true;
         submit.classList.add('loading');
         try {
-          const payload = { ...data, remember: Boolean(data.remember) };
-          if (current === 'forgot') {
+          if (step === 'email') {
+            const email = data.email.trim();
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('ایمیل معتبر نیست.');
+            const account = await auth.lookupAccount(email);
+            if (account.exists && !account.hasPassword) throw new Error('این حساب با گوگل ساخته شده است؛ با دکمه «ادامه با گوگل» وارد شوید.');
+            setStep(account.exists ? 'password' : 'register');
+          } else if (step === 'password') {
+            done(await auth.login(payload), false);
+          } else if (step === 'register') {
+            const user = await auth.register(payload);
+            recoveryCode = { code: await auth.createRecoveryCode(), fresh: true };
+            done(user, true);
+          } else if (step === 'forgot') {
             recoveryCode = { code: await auth.resetPassword(payload), fresh: false };
             toast('رمز عبور جدید ثبت شد', 'success');
             signedIn = true;
             close(true);
-            return;
           }
-          const user = current === 'register' ? await auth.register(payload) : await auth.login(payload);
-          if (current === 'register') recoveryCode = { code: await auth.createRecoveryCode(), fresh: true };
-          done(user, current === 'register');
         } catch (err) {
           showError(err.message);
         } finally {
@@ -278,13 +432,13 @@ function openAuthModal({ mode = 'login', reason = '' } = {}) {
         google.renderButton(slot, async (credential) => {
           try {
             const existed = Boolean(auth.currentUser());
-            const user = await auth.loginWithGoogle(google.parseCredential(credential), { remember: Boolean($('input[name=remember]', form).checked) });
+            const user = await auth.loginWithGoogle(google.parseCredential(credential), { remember: Boolean(input('remember').checked) });
             done(user, !existed && Date.now() - user.createdAt < 5000);
           } catch (err) {
             showError(err.message);
           }
         }, { theme: currentTheme() }).catch((err) => {
-          slot.innerHTML = `<p class="muted small"></p>`;
+          slot.innerHTML = '<p class="muted small"></p>';
           $('p', slot).textContent = err.message;
         });
       }
@@ -300,16 +454,16 @@ function openAuthModal({ mode = 'login', reason = '' } = {}) {
   return authOpen;
 }
 
-// ---------- Studio ----------
+// ---------- Studio (composer + thread) ----------
 
-function optionGroup(name, options, selected) {
-  return `<div class="segmented" role="radiogroup" data-name="${name}">
-    ${Object.entries(options).map(([value, label]) => `
-      <label class="seg ${value === selected ? 'active' : ''}">
-        <input type="radio" name="${name}" value="${value}" ${value === selected ? 'checked' : ''}>
-        <span>${esc(typeof label === 'string' ? label : label.label)}</span>
-      </label>`).join('')}
-  </div>`;
+function selectPill(name, options, selected, iconName, label) {
+  return `
+    <label class="pill-select" title="${esc(label)}">
+      ${icon(iconName)}
+      <select name="${name}" aria-label="${esc(label)}">
+        ${Object.entries(options).map(([value, opt]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${esc(typeof opt === 'string' ? opt : opt.label)}</option>`).join('')}
+      </select>
+    </label>`;
 }
 
 function readDraft() {
@@ -317,169 +471,176 @@ function readDraft() {
 }
 
 function saveDraft(draft) {
-  try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch { /* ignore */ }
+  try {
+    if (draft) sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    else sessionStorage.removeItem(DRAFT_KEY);
+  } catch { /* ignore */ }
 }
 
-function renderStudio() {
+function composerHtml(draft) {
+  return `
+    <form class="composer" id="composer">
+      <textarea id="source" name="source" dir="auto" rows="1" maxlength="20000" aria-label="متن شما"
+        placeholder="ایده، درخواست یا پرامپت خامتان را بنویسید…">${esc(draft.source)}</textarea>
+      <div class="composer-bar">
+        <div class="composer-tools">
+          ${selectPill('type', engine.TARGETS, draft.type, 'sparkles', 'نوع پرامپت')}
+          ${selectPill('lang', engine.LANGS, draft.lang, 'globe', 'زبان خروجی')}
+          ${selectPill('detail', engine.DETAILS, draft.detail, 'sliders', 'میزان جزئیات')}
+        </div>
+        <button type="submit" class="send-btn" id="generate-btn" aria-label="ساخت پرامپت" title="ساخت پرامپت" disabled>${icon('arrowUp')}</button>
+      </div>
+    </form>
+    <p class="composer-foot"><span>پرامپت‌ساز ممکن است اشتباه کند؛ نتیجه را بررسی کنید.</span><span id="quota-note"></span></p>`;
+}
+
+async function renderStudio(params) {
   const s = auth.settings();
-  const draft = readDraft() || { source: '', type: s.defaultType, lang: s.defaultLang, detail: s.defaultDetail };
   const user = auth.currentUser();
+  const requested = params?.get('p');
+  if (requested && user) {
+    try {
+      studio.result = await prompts.get(user.id, requested);
+    } catch {
+      studio.result = null;
+      history.replaceState(null, '', '#/studio');
+    }
+  } else if (!requested && !studio.busy) {
+    studio.result = null;
+  }
+  const draft = readDraft() || { source: '', type: s.defaultType, lang: s.defaultLang, detail: s.defaultDetail };
+  const threadMode = Boolean(studio.result || studio.busy);
+  const firstName = user ? String(user.name).split(/\s+/)[0] : '';
 
   view.innerHTML = `
-    ${user ? `
-    <header class="page-head">
-      <div>
-        <h1>سلام ${esc(String(user.name).split(/\s+/)[0])} 👋</h1>
-        <p class="muted">ایده، درخواست یا پرامپت خامتان را بنویسید تا به یک پرامپت حرفه‌ای تبدیل شود.</p>
+    <section class="studio ${threadMode ? 'is-thread' : 'is-empty'}">
+      ${user && engine.engineFor(s) === 'claude' && !s.apiKey ? `
+        <div class="banner">${icon('key')}
+          <div><strong>کلید API هنوز تنظیم نشده است.</strong>
+          <span>موتور «Claude با کلید شخصی» انتخاب شده است. کلید را در تنظیمات وارد کنید یا به سرویس رایگان برگردید.</span></div>
+          <a class="btn btn-sm btn-primary" href="#/settings">تنظیمات</a>
+        </div>` : ''}
+      <div class="thread" id="thread" aria-live="polite"></div>
+      <div class="empty-hero" ${threadMode ? 'hidden' : ''}>
+        <h1>${firstName ? `${esc(firstName)}، امروز چه پرامپتی بسازیم؟` : 'امروز چه پرامپتی بسازیم؟'}</h1>
       </div>
-    </header>` : `
-    <header class="hero">
-      <span class="brand-mark brand-mark-lg">${icon('wand')}</span>
-      <h1>چه پرامپتی می‌خواهید بسازید؟</h1>
-      <p class="muted">ایده‌ی خامتان را به فارسی یا انگلیسی بنویسید؛ پرامپتی حرفه‌ای با ادبیات هوش مصنوعی به هر دو زبان تحویل بگیرید.</p>
-      <ul class="hero-points">
-        <li>${icon('sparkles')} بازنویسی و ترجمه فارسی ⇄ انگلیسی</li>
-        <li>${icon('history')} ذخیره خودکار در تاریخچه</li>
-        <li>${icon('archive')} آرشیو با جستجوی پیشرفته</li>
-      </ul>
-    </header>`}
-    ${user && engine.engineFor(s) === 'claude' && !s.apiKey ? `
-      <div class="banner">${icon('key')}
-        <div><strong>کلید API هنوز تنظیم نشده است.</strong>
-        <span>موتور «Claude با کلید شخصی» انتخاب شده است. کلید را در تنظیمات وارد کنید یا به سرویس رایگان برگردید.</span></div>
-        <a class="btn btn-sm btn-primary" href="#/settings">رفتن به تنظیمات</a>
-      </div>` : ''}
-    <section class="studio">
-      <form class="card composer" id="composer">
-        <div class="composer-input">
-          <textarea id="source" name="source" dir="auto" rows="7" maxlength="20000"
-            placeholder="مثلاً: یک پرامپت برای ساخت لوگوی مینیمال یک کافه با رنگ‌های گرم می‌خواهم…">${esc(draft.source)}</textarea>
-          <div class="composer-meta">
-            <span><span id="char-count">${num(draft.source.length)} کاراکتر</span><span id="quota-note" class="quota-note"></span></span>
-            <span class="kbd-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> برای ساخت</span>
-          </div>
+      <div class="composer-wrap">
+        ${composerHtml(draft)}
+        <div class="suggestions" ${threadMode ? 'hidden' : ''}>
+          ${EXAMPLES.map((ex, i) => `<button type="button" class="suggestion" data-example="${i}">${icon(ex.type === 'image' ? 'image' : ex.type === 'coding' ? 'code' : ex.type === 'video' ? 'video' : 'pen')}<span>${esc(ex.text)}</span></button>`).join('')}
         </div>
-        <div class="options">
-          <div class="option-row">
-            <span class="option-label">نوع پرامپت</span>
-            ${optionGroup('type', engine.TARGETS, draft.type)}
-          </div>
-          <div class="option-grid">
-            <div class="option-row">
-              <span class="option-label">زبان خروجی</span>
-              ${optionGroup('lang', engine.LANGS, draft.lang)}
-            </div>
-            <div class="option-row">
-              <span class="option-label">میزان جزئیات</span>
-              ${optionGroup('detail', engine.DETAILS, draft.detail)}
-            </div>
-          </div>
-        </div>
-        <div class="composer-actions">
-          <button type="button" class="btn btn-ghost" id="clear-btn">${icon('x')} پاک کردن</button>
-          <button type="submit" class="btn btn-primary btn-lg" id="generate-btn">${icon('sparkles')}<span>ساخت پرامپت</span></button>
-        </div>
-      </form>
-      <div id="result"></div>
+      </div>
     </section>`;
 
   const form = $('#composer');
   const source = $('#source');
+  const send = $('#generate-btn');
   const autoGrow = () => {
     source.style.height = 'auto';
-    source.style.height = `${Math.min(source.scrollHeight + 2, 520)}px`;
+    source.style.height = `${Math.min(source.scrollHeight, 280)}px`;
   };
-  const persist = () => {
+  const sync = () => {
+    send.disabled = !studio.busy && !source.value.trim();
     const data = Object.fromEntries(new FormData(form));
     saveDraft({ source: data.source, type: data.type, lang: data.lang, detail: data.detail });
   };
 
-  source.addEventListener('input', () => {
-    $('#char-count').textContent = `${num(source.value.length)} کاراکتر`;
-    autoGrow();
-    persist();
-  });
+  source.addEventListener('input', () => { autoGrow(); sync(); });
   source.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    // Enter sends, Shift+Enter adds a line (touch keyboards keep Enter for new lines).
+    const touch = matchMedia('(pointer: coarse)').matches;
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && (!touch || e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      form.requestSubmit();
+      if (source.value.trim() && !studio.busy) form.requestSubmit();
     }
   });
-  $$('.segmented', form).forEach((group) => {
-    group.addEventListener('change', (e) => {
-      $$('.seg', group).forEach((seg) => seg.classList.toggle('active', seg.contains(e.target)));
-      persist();
-    });
-  });
-  $('#clear-btn').addEventListener('click', () => {
-    source.value = '';
-    source.dispatchEvent(new Event('input'));
+  $$('select', form).forEach((sel) => sel.addEventListener('change', sync));
+  $$('[data-example]').forEach((b) => b.addEventListener('click', () => {
+    const ex = EXAMPLES[Number(b.dataset.example)];
+    source.value = ex.text;
+    form.elements.type.value = ex.type;
+    autoGrow();
+    sync();
     source.focus();
-  });
+  }));
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    if (studio.busy) cancelGeneration();
+    if (studio.busy) studio.controller?.abort();
     else runGeneration();
   });
 
-  requestAnimationFrame(autoGrow);
+  requestAnimationFrame(() => { autoGrow(); sync(); });
   if (engine.engineFor(s) === 'free') refreshQuotaNote();
-  if (studio.busy) showLoading();
-  else if (studio.result) showResult(studio.result);
+  if (studio.busy) showPending();
+  else if (studio.result) showThread(studio.result);
+  if (!threadMode && !mobileQuery.matches) source.focus();
 }
 
 /** Shows today's remaining free generations under the composer (free engine only). */
 async function refreshQuotaNote(known) {
   const q = Number.isFinite(known) ? { remaining: known } : await engine.freeQuota();
   const el = $('#quota-note');
-  if (el && q) el.textContent = ` · ${num(q.remaining)} پرامپت رایگان امروز`;
+  if (el && q) el.textContent = `${num(q.remaining)} پرامپت رایگان امروز`;
 }
 
 function setBusy(busy) {
   studio.busy = busy;
   const btn = $('#generate-btn');
   if (!btn) return;
-  btn.classList.toggle('btn-danger', busy);
-  btn.classList.toggle('btn-primary', !busy);
-  btn.innerHTML = busy ? `${icon('stop')}<span>توقف</span>` : `${icon('sparkles')}<span>ساخت پرامپت</span>`;
+  btn.classList.toggle('is-stop', busy);
+  btn.innerHTML = busy ? icon('stop') : icon('arrowUp');
+  btn.setAttribute('aria-label', busy ? 'توقف' : 'ساخت پرامپت');
+  btn.title = busy ? 'توقف' : 'ساخت پرامپت';
+  btn.disabled = !busy && !$('#source')?.value.trim();
 }
 
-function showLoading() {
-  const box = $('#result');
-  if (!box) return;
-  box.innerHTML = `
-    <div class="card result loading-card" aria-busy="true">
-      <div class="thinking"><span class="orb"></span><strong>در حال ساخت پرامپت…</strong><span class="muted" id="elapsed"></span></div>
-      <div class="skeleton w-40"></div>
-      <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton w-80"></div>
-      <div class="skeleton"></div><div class="skeleton w-60"></div>
+function enterThreadMode() {
+  $('.studio')?.classList.replace('is-empty', 'is-thread');
+  $$('.empty-hero, .suggestions').forEach((el) => { el.hidden = true; });
+}
+
+function exitThreadMode() {
+  $('.studio')?.classList.replace('is-thread', 'is-empty');
+  $$('.empty-hero, .suggestions').forEach((el) => { el.hidden = false; });
+}
+
+function userBubble(text) {
+  return `<div class="msg msg-user"><div class="bubble" dir="auto"></div></div>`.replace('></div></div>', `>${esc(text)}</div></div>`);
+}
+
+function showPending() {
+  const thread = $('#thread');
+  if (!thread || !studio.pending) return;
+  enterThreadMode();
+  thread.innerHTML = `
+    ${userBubble(studio.pending.source)}
+    <div class="msg msg-bot">
+      <span class="bot-avatar">${icon('wand')}</span>
+      <div class="bot-body">
+        <div class="thinking"><span class="dots"><i></i><i></i><i></i></span><span>در حال ساخت پرامپت</span><span class="muted" id="elapsed"></span></div>
+        <div class="skeleton w-60"></div><div class="skeleton"></div><div class="skeleton w-80"></div>
+      </div>
     </div>`;
   setBusy(true);
   const tick = () => {
     const el = $('#elapsed');
-    if (el) el.textContent = `${num(Math.floor((Date.now() - studio.startedAt) / 1000))} ثانیه`;
+    if (el) el.textContent = `· ${num(Math.floor((Date.now() - studio.startedAt) / 1000))} ثانیه`;
   };
   tick();
   clearInterval(studio.timer);
   studio.timer = setInterval(tick, 1000);
-}
-
-function cancelGeneration() {
-  studio.controller?.abort();
+  thread.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'end' });
 }
 
 async function runGeneration() {
   const form = $('#composer');
   const data = Object.fromEntries(new FormData(form));
   const text = data.source.trim();
-  if (!text) {
-    toast('ابتدا متنی بنویسید', 'error');
-    $('#source').focus();
-    return;
-  }
+  if (!text) return;
   if (!auth.currentUser()) {
     // Guests can write freely; signing in is asked for only when they generate. The draft is kept.
-    if (!(await openAuthModal({ reason: 'برای ساخت پرامپت و ذخیره آن در تاریخچه، وارد شوید یا حساب بسازید.' }))) return;
+    if (!(await openAuthModal({ reason: 'برای ساخت پرامپت و ذخیره آن در تاریخچه، وارد شوید یا یک حساب رایگان بسازید.' }))) return;
+    await new Promise((r) => setTimeout(r, 50)); // let the re-render after sign-in settle
   }
   const s = auth.settings();
   if (engine.engineFor(s) === 'claude' && !s.apiKey) {
@@ -491,8 +652,11 @@ async function runGeneration() {
   studio.controller = new AbortController();
   studio.startedAt = Date.now();
   studio.result = null;
-  showLoading();
-  $('#result')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  studio.pending = { source: text };
+  const box = $('#source');
+  if (box) { box.value = ''; box.style.height = 'auto'; }
+  saveDraft({ source: '', ...options });
+  showPending();
 
   try {
     const out = await engine.generate(text, options, s, studio.controller.signal);
@@ -507,98 +671,96 @@ async function runGeneration() {
       ...options,
     });
     studio.result = record;
-    if ($('#result')) showResult(record, true);
-    toast('پرامپت ساخته و در تاریخچه ذخیره شد', 'success');
+    if (parseHash().path === '/studio') {
+      syncQuery({ p: record.id });
+      showThread(record, true);
+    }
+    renderSidebar();
     if (out.remaining != null) refreshQuotaNote(out.remaining);
   } catch (err) {
-    const box = $('#result');
-    if (box && err.code !== 'aborted') {
-      box.innerHTML = `<div class="card result error-card">${icon('info', 'icon-lg')}<div><strong>ساخت پرامپت انجام نشد</strong><p></p></div></div>`;
-      $('p', box).textContent = err.message;
-    } else if (box) {
-      box.innerHTML = '';
+    const thread = $('#thread');
+    if (thread && err.code !== 'aborted') {
+      thread.innerHTML = `${userBubble(text)}
+        <div class="msg msg-bot"><span class="bot-avatar">${icon('wand')}</span>
+          <div class="bot-body"><div class="error-card">${icon('info')}<div><strong>ساخت پرامپت انجام نشد</strong><p></p></div></div></div>
+        </div>`;
+      $('.error-card p', thread).textContent = err.message;
     }
-    if (err.code === 'aborted') toast('لغو شد');
-    else toast(err.message, 'error', 5000);
+    // Put the text back so nothing the user wrote is lost.
+    const input = $('#source');
+    if (input && !input.value) { input.value = text; input.dispatchEvent(new Event('input')); }
+    if (err.code === 'aborted') {
+      if (thread) thread.innerHTML = '';
+      exitThreadMode();
+      toast('لغو شد');
+    }
   } finally {
     clearInterval(studio.timer);
     studio.controller = null;
+    studio.pending = null;
     setBusy(false);
   }
 }
 
-function promptBlock(label, text, lang) {
-  if (!text) return '';
-  const dir = lang === 'fa' ? 'rtl' : 'ltr';
-  return `
-    <div class="prompt-block" data-lang="${lang}">
-      <div class="prompt-block-head">
-        <span class="lang-pill">${label}</span>
-        <button class="btn btn-sm btn-ghost copy-btn" data-copy="${lang}">${icon('copy')}<span>کپی</span></button>
+function showThread(record, animate = false) {
+  const thread = $('#thread');
+  if (!thread) return;
+  enterThreadMode();
+  const langs = [record.promptFa && 'fa', record.promptEn && 'en'].filter(Boolean);
+  const first = langs[0];
+  thread.innerHTML = `
+    ${userBubble(record.source)}
+    <div class="msg msg-bot ${animate ? 'pop-in' : ''}">
+      <span class="bot-avatar">${icon('wand')}</span>
+      <div class="bot-body">
+        <h2 class="result-title" dir="auto"></h2>
+        <p class="result-meta">${esc(engine.TARGETS[record.type]?.label || '')} · ${esc(engine.DETAILS[record.detail] || '')}</p>
+        ${langs.length > 1 ? `
+          <div class="tabs" role="tablist">
+            ${langs.map((l) => `<button role="tab" class="tab ${l === first ? 'active' : ''}" data-tab="${l}" aria-selected="${l === first}">${l === 'fa' ? 'فارسی' : 'انگلیسی'}</button>`).join('')}
+          </div>` : ''}
+        ${langs.map((l) => `
+          <div class="prompt-block" data-lang="${l}" ${l === first ? '' : 'hidden'}>
+            <pre class="prompt-text" dir="${l === 'fa' ? 'rtl' : 'ltr'}" lang="${l}">${esc(l === 'fa' ? record.promptFa : record.promptEn)}</pre>
+          </div>`).join('')}
+        ${record.improvements?.length ? `
+          <details class="improvements">
+            <summary>${icon('sparkles')} چه چیزهایی بهتر شد؟</summary>
+            <ul>${record.improvements.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
+          </details>` : ''}
+        <div class="msg-actions">
+          <button class="icon-btn copy-btn" id="copy-result" aria-label="کپی" title="کپی">${icon('copy')}</button>
+          <button class="icon-btn ${record.archived ? 'on' : ''}" id="archive-btn" aria-label="${record.archived ? 'در آرشیو' : 'ذخیره در آرشیو'}" title="${record.archived ? 'در آرشیو (ویرایش)' : 'ذخیره در آرشیو'}">${icon('archive')}</button>
+          <button class="icon-btn" id="refine-btn" aria-label="بهبود دوباره" title="بهبود دوباره">${icon('refresh')}</button>
+        </div>
       </div>
-      <pre class="prompt-text" dir="${dir}" lang="${lang}">${esc(text)}</pre>
     </div>`;
-}
+  $('.result-title', thread).textContent = record.title || 'پرامپت جدید';
+  const activeLang = () => $('.tab.active', thread)?.dataset.tab || first;
 
-function showResult(record, animate = false) {
-  const box = $('#result');
-  if (!box) return;
-  const both = record.promptEn && record.promptFa;
-  box.innerHTML = `
-    <article class="card result ${animate ? 'pop-in' : ''}">
-      <header class="result-head">
-        <div>
-          <h2 dir="auto"></h2>
-          <p class="muted small">${esc(engine.TARGETS[record.type]?.label || '')} · ${esc(engine.DETAILS[record.detail] || '')} · ${esc(record.model)}</p>
-        </div>
-        <div class="result-actions">
-          <button class="btn btn-sm btn-ghost" id="refine-btn" title="استفاده از نتیجه به‌عنوان ورودی جدید">${icon('refresh')}<span>بهبود دوباره</span></button>
-          <button class="btn btn-sm ${record.archived ? 'btn-soft' : 'btn-primary'}" id="archive-btn">${icon('archive')}<span>${record.archived ? 'در آرشیو' : 'ذخیره در آرشیو'}</span></button>
-        </div>
-      </header>
-      ${both ? `
-        <div class="tabs" role="tablist">
-          <button role="tab" class="tab active" data-tab="both" aria-selected="true">هر دو</button>
-          <button role="tab" class="tab" data-tab="en" aria-selected="false">English</button>
-          <button role="tab" class="tab" data-tab="fa" aria-selected="false">فارسی</button>
-        </div>` : ''}
-      <div class="prompt-blocks ${both ? 'two' : ''}">
-        ${promptBlock('English', record.promptEn, 'en')}
-        ${promptBlock('فارسی', record.promptFa, 'fa')}
-      </div>
-      ${record.improvements?.length ? `
-        <div class="improvements">
-          <strong>${icon('sparkles')} بهبودهای انجام‌شده</strong>
-          <ul>${record.improvements.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
-        </div>` : ''}
-    </article>`;
-  $('h2', box).textContent = record.title || 'پرامپت جدید';
-
-  $$('.copy-btn', box).forEach((b) => b.addEventListener('click', () => copyText(b.dataset.copy === 'fa' ? record.promptFa : record.promptEn, b)));
-  $$('.tab', box).forEach((tab) => tab.addEventListener('click', () => {
-    $$('.tab', box).forEach((t) => {
+  $$('.tab', thread).forEach((tab) => tab.addEventListener('click', () => {
+    $$('.tab', thread).forEach((t) => {
       t.classList.toggle('active', t === tab);
       t.setAttribute('aria-selected', String(t === tab));
     });
-    $$('.prompt-block', box).forEach((b) => {
-      b.hidden = tab.dataset.tab !== 'both' && b.dataset.lang !== tab.dataset.tab;
-    });
-    $('.prompt-blocks', box).classList.toggle('two', tab.dataset.tab === 'both');
+    $$('.prompt-block', thread).forEach((b) => { b.hidden = b.dataset.lang !== tab.dataset.tab; });
   }));
+  $('#copy-result').addEventListener('click', (e) => copyText(activeLang() === 'fa' ? record.promptFa : record.promptEn, e.currentTarget));
   $('#archive-btn').addEventListener('click', async () => {
     const saved = await openArchiveDialog(record);
     if (saved) {
       studio.result = saved;
-      showResult(saved);
+      showThread(saved);
+      renderSidebar();
     }
   });
   $('#refine-btn').addEventListener('click', () => {
     const source = $('#source');
-    source.value = record.promptEn || record.promptFa;
+    source.value = activeLang() === 'fa' ? record.promptFa : record.promptEn;
     source.dispatchEvent(new Event('input'));
     source.focus();
-    source.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
+  if (animate) thread.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ---------- Archive dialog (save / edit) ----------
@@ -665,6 +827,18 @@ async function openArchiveDialog(record, { editPrompts = false } = {}) {
 
 // ---------- Prompt card & detail ----------
 
+function promptBlock(label, text, lang) {
+  if (!text) return '';
+  return `
+    <div class="prompt-block" data-lang="${lang}">
+      <div class="prompt-block-head">
+        <span class="lang-pill">${label}</span>
+        <button class="btn btn-sm btn-ghost copy-btn" data-copy="${lang}">${icon('copy')}<span>کپی</span></button>
+      </div>
+      <pre class="prompt-text" dir="${lang === 'fa' ? 'rtl' : 'ltr'}" lang="${lang}">${esc(text)}</pre>
+    </div>`;
+}
+
 function metaBadges(r) {
   return `
     <span class="badge">${esc(engine.TARGETS[r.type]?.label || r.type)}</span>
@@ -706,7 +880,7 @@ async function openDetail(record, refresh) {
         <p class="muted small">${esc(formatDate(record.createdAt))} · ${esc(record.model || '')}</p>
         <div class="detail-source"><strong>متن اولیه</strong><p dir="auto">${esc(record.source)}</p></div>
         <div class="prompt-blocks ${both ? 'two' : ''}">
-          ${promptBlock('English', record.promptEn, 'en')}
+          ${promptBlock('انگلیسی', record.promptEn, 'en')}
           ${promptBlock('فارسی', record.promptFa, 'fa')}
         </div>
         ${record.notes ? `<div class="detail-notes"><strong>یادداشت</strong><p dir="auto">${esc(record.notes)}</p></div>` : ''}
@@ -735,9 +909,8 @@ async function openDetail(record, refresh) {
 }
 
 function openInStudio(record) {
-  saveDraft({ source: record.source, type: record.type, lang: record.lang, detail: record.detail });
   studio.result = record;
-  navigate('/studio');
+  navigate(`/studio?p=${encodeURIComponent(record.id)}`);
 }
 
 /** Wires card clicks inside `root` to actions. `refresh` re-renders the list. */
@@ -859,15 +1032,6 @@ async function renderHistory(params) {
   draw();
 }
 
-/** Keeps filters in the URL (bookmarkable) without triggering a re-route. */
-function syncQuery(values) {
-  const { path } = parseHash();
-  const params = new URLSearchParams();
-  Object.entries(values).forEach(([k, v]) => { if (v) params.set(k, v); });
-  const qs = params.toString();
-  history.replaceState(null, '', `#${path}${qs ? `?${qs}` : ''}`);
-}
-
 function staggerCards(root) {
   $$('.prompt-card', root).forEach((card, i) => {
     card.style.animationDelay = `${Math.min(i, 12) * 35}ms`;
@@ -877,7 +1041,17 @@ function staggerCards(root) {
 
 // ---------- Archive ----------
 
-const ARCHIVE_FILTERS = ['q', 'category', 'tag', 'type', 'lang', 'favorite', 'from', 'to', 'sort'];
+const ARCHIVE_FILTERS = ['q', 'category', 'tag', 'type', 'lang', 'favorite', 'range', 'sort'];
+const DATE_RANGES = { '': 'همه زمان‌ها', today: 'امروز', week: '۷ روز اخیر', month: '۳۰ روز اخیر', year: '۱ سال اخیر' };
+
+/** Converts a named date range into the {from} bound (YYYY-MM-DD, local time) that prompts.search expects. */
+function rangeToFrom(range) {
+  const days = { today: 0, week: 6, month: 29, year: 364 }[range];
+  if (days === undefined) return '';
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 async function renderArchive(params) {
   const user = auth.currentUser();
@@ -885,7 +1059,7 @@ async function renderArchive(params) {
   const rows = all.filter((r) => r.archived);
   const f = Object.fromEntries(ARCHIVE_FILTERS.map((k) => [k, params.get(k) || '']));
   const { categories, tags } = prompts.facets(rows);
-  const advancedOpen = Boolean(f.category || f.type || f.lang || f.from || f.to || f.favorite || (f.sort && f.sort !== 'newest'));
+  const advancedOpen = Boolean(f.category || f.type || f.lang || f.range || f.favorite || (f.sort && f.sort !== 'newest'));
 
   view.innerHTML = `
     <header class="page-head">
@@ -911,8 +1085,8 @@ async function renderArchive(params) {
               <option value="updated" ${f.sort === 'updated' ? 'selected' : ''}>آخرین ویرایش</option>
               <option value="title" ${f.sort === 'title' ? 'selected' : ''}>عنوان (الفبا)</option>
             </select></label>
-          <label class="field"><span>از تاریخ</span><input type="date" name="from" value="${esc(f.from)}"></label>
-          <label class="field"><span>تا تاریخ</span><input type="date" name="to" value="${esc(f.to)}"></label>
+          <label class="field"><span>بازه زمانی</span>
+            <select name="range">${Object.entries(DATE_RANGES).map(([k, v]) => `<option value="${k}" ${k === f.range ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></label>
         </div>
         <div class="filters-foot">
           <label class="check"><input type="checkbox" name="favorite" value="1" ${f.favorite ? 'checked' : ''}><span>${icon('star')} فقط علاقه‌مندی‌ها</span></label>
@@ -937,7 +1111,7 @@ async function renderArchive(params) {
   const draw = () => {
     const current = read();
     syncQuery(current);
-    const found = prompts.search(rows, { ...current, favorite: Boolean(current.favorite) });
+    const found = prompts.search(rows, { ...current, from: rangeToFrom(current.range), favorite: Boolean(current.favorite) });
     const terms = prompts.queryTerms(current.q);
     $('#result-count').textContent = rows.length ? `${num(found.length)} نتیجه از ${num(rows.length)}` : '';
     if (!rows.length) {
@@ -1040,12 +1214,7 @@ async function renderProfile() {
   $('.profile-id p').textContent = user.email;
   paintAvatars(view);
 
-  $('#logout-btn').addEventListener('click', () => {
-    auth.logout();
-    studio.result = null;
-    toast('از حساب خارج شدید');
-    navigate('/studio');
-  });
+  $('#logout-btn').addEventListener('click', logout);
   $('#avatar-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -1136,7 +1305,7 @@ function renderSettings() {
       <div class="grid-2 tight">
         <label class="field"><span>مدل</span>
           <select name="model">${engine.MODELS.map((m) => `<option value="${m.id}" ${m.id === s.model ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>
-        <label class="field"><span>عمق فکر کردن (Effort)</span>
+        <label class="field"><span>عمق فکر کردن</span>
           <select name="effort">
             ${[['low', 'کم — سریع‌تر'], ['medium', 'متوسط — پیشنهادی'], ['high', 'زیاد — دقیق‌تر'], ['xhigh', 'خیلی زیاد']].map(([v, l]) => `<option value="${v}" ${v === s.effort ? 'selected' : ''}>${l}</option>`).join('')}
           </select></label>
@@ -1225,7 +1394,7 @@ function renderSettings() {
       if (value === 'system') localStorage.removeItem(THEME_KEY);
       else localStorage.setItem(THEME_KEY, value);
     } catch { /* ignore */ }
-    renderChrome();
+    renderSidebar();
   });
   $('#export-btn').addEventListener('click', async () => {
     const data = await prompts.exportData(auth.currentUser());

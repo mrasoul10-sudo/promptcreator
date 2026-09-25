@@ -1,7 +1,7 @@
 // Local accounts: stored in IndexedDB, passwords hashed with PBKDF2 (WebCrypto).
 // This protects profiles from casual access on a shared browser; it is not a server-side account.
 
-import * as db from './db.js?v=202609251054';
+import * as db from './db.js?v=202609251117';
 
 const SESSION_KEY = 'pc.session';
 const PBKDF2_ITERATIONS = 210000;
@@ -13,7 +13,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   model: 'claude-opus-5',
   effort: 'medium',
   defaultLang: 'both',
-  defaultType: 'general',
+  defaultType: 'auto',
   defaultDetail: 'balanced',
 });
 
@@ -134,6 +134,12 @@ export async function resetPassword({ email, code, password, remember = true }) 
   await db.put('users', current);
   persistSession(current.id, remember);
   return createRecoveryCode();
+}
+
+/** Whether a local account exists for this email (drives the email-first sign-in step). */
+export async function lookupAccount(email) {
+  const user = await db.getByIndex('users', 'email', normalizeEmail(email));
+  return { exists: Boolean(user), hasPassword: Boolean(user?.passHash) };
 }
 
 export async function login({ email, password, remember = true }) {
