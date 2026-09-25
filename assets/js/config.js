@@ -7,4 +7,4 @@ export const GOOGLE_CLIENT_ID = '737310583952-dn13t7a3tpp9of4dsn5ug7ed7mah9bsk.a
 
 // Base URL of the free prompt service (worker/, a Cloudflare Worker holding the Gemini key), e.g.
 // 'https://promptcreator-api.<your-subdomain>.workers.dev'. Leave empty to require the user's own Claude key.
-export const FREE_API_URL = '';
+export const FREE_API_URL = 'https://promptcreator-api.m-rasoul10.workers.dev';

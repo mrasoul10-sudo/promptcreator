@@ -1,12 +1,12 @@
 // Prompt engine: rewrites a rough idea (Persian or English) into a professional prompt.
 // Default: the site's free service (Gemini behind worker/, no key needed). Optional: Claude with the user's own key.
 
-import Anthropic from '../vendor/anthropic-sdk.js?v=202609251027';
-import { FREE_API_URL } from './config.js?v=202609251027';
+import Anthropic from '../vendor/anthropic-sdk.js?v=202609251054';
+import { FREE_API_URL } from './config.js?v=202609251054';
 import {
   TARGETS, LANGS, DETAILS, SYSTEM_PROMPT, OUTPUT_SCHEMA, MAX_SOURCE_LENGTH,
   buildUserMessage, normalizeOptions, parseResult,
-} from './prompt-spec.js?v=202609251027';
+} from './prompt-spec.js?v=202609251054';
 
 export { TARGETS, LANGS, DETAILS };
 
