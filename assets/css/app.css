@@ -166,7 +166,7 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2
   body.sidebar-closed .sidebar { width: 60px; }
   body.sidebar-closed .sb-head { flex-direction: column; padding: 10px 0 6px; }
   body.sidebar-closed .sb-toggle { width: 40px; height: 40px; }
-  body.sidebar-closed .sb-toggle .toggle-logo { display: block; width: 30px; height: 30px; }
+  body.sidebar-closed .sb-toggle .toggle-logo { display: block; width: 32px; height: 32px; }
   body.sidebar-closed .sb-toggle .icon { display: none; }
   body.sidebar-closed .sb-toggle:hover .toggle-logo { display: none; }
   body.sidebar-closed .sb-toggle:hover .icon { display: block; }
@@ -187,10 +187,9 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2
 .brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 10px; font-weight: 800; font-size: 1.05rem; }
 .brand:hover { background: var(--hover); }
 .logo-mark { display: block; flex: none; }
-.logo-mark .logo-bg { fill: var(--brand); }
-.logo-mark .logo-bubble { fill: #fff; }
-.logo-mark .logo-star { fill: var(--brand); }
-.brand-mark { width: 30px; height: 30px; }
+.logo-mark .logo-bubble, .logo-mark .logo-eye { fill: var(--brand); }
+.logo-mark .logo-head { fill: #fff; }
+.brand-mark { width: 34px; height: 34px; }
 .sb-toggle .toggle-logo { display: none; }
 
 .sb-nav { display: flex; flex-direction: column; gap: 1px; padding: 4px 8px 8px; }

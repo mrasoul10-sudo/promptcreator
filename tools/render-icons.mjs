@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { readFileSync, mkdirSync } from 'node:fs';
 
 const root = new URL('..', import.meta.url).pathname;
-const logo = readFileSync(`${root}assets/img/logo.svg`, 'utf8');
+const logo = readFileSync(`${root}assets/img/app-icon.svg`, 'utf8'); // rounded-square app icon
 const maskable = readFileSync(`${root}assets/img/logo-maskable.svg`, 'utf8');
 const out = `${root}assets/img/icons`;
 mkdirSync(out, { recursive: true });
@@ -20,14 +20,15 @@ const jobs = [
 ];
 
 // Android (Capacitor assets): adaptive icon layers, legacy icon and splash screens.
-const symbol = (fill) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g transform="translate(14.4 14.4) scale(0.55)"><path d="M20 13h24a9 9 0 0 1 9 9v15a9 9 0 0 1-9 9h-4l6 8-13-8H20a9 9 0 0 1-9-9V22a9 9 0 0 1 9-9z" fill="#fff"/><path d="M32 18.5c1.2 6.3 4.7 9.8 11 11-6.3 1.2-9.8 4.7-11 11-1.2-6.3-4.7-9.8-11-11 6.3-1.2 9.8-4.7 11-11z" fill="${fill}"/></g></svg>`;
+// Foreground: the white mark inside the adaptive-icon safe zone, over the brand-color background layer.
+const symbol = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><g transform="translate(15.0 16.0) scale(0.5)"><path d="M12.03 24.85A22 22 0 1 1 28.68 47.35L12.4 60Z" fill="#fff"/><path d="M22.74 35.1A13 13 0 1 1 27.9 40.08L21.8 42.6Z" fill="#6C4CF5"/><path d="M33.05 16.2h1.9v-4.8h-1.9z" fill="#6C4CF5"/><circle cx="34" cy="9.7" r="2.6" fill="#6C4CF5"/><ellipse cx="29.2" cy="29.0" rx="2.4" ry="3.5" fill="#fff"/><ellipse cx="38.8" cy="29.0" rx="2.4" ry="3.5" fill="#fff"/></g></svg>`;
 const solid = (color) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="${color}"/></svg>`;
 const splash = (bg) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2732 2732"><rect width="2732" height="2732" fill="${bg}"/><g transform="translate(1110 1110) scale(8)">${logo.replace(/<\/?svg[^>]*>/g, '')}</g></svg>`;
 const androidOut = `${root}app-android/assets`;
 mkdirSync(androidOut, { recursive: true });
 const androidJobs = [
   ['icon-only.png', maskable, 1024, false],
-  ['icon-foreground.png', symbol('#6C4CF5'), 1024, true],
+  ['icon-foreground.png', symbol, 1024, true],
   ['icon-background.png', solid('#6C4CF5'), 1024, false],
   ['splash.png', splash('#ffffff'), 2732, false],
   ['splash-dark.png', splash('#212121'), 2732, false],

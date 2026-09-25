@@ -4,8 +4,8 @@
 // Accounts from before the server (local-only, PBKDF2 hash in IndexedDB) move to the server on their next sign-in,
 // together with their prompts.
 
-import * as db from './db.js?v=202609251412';
-import * as api from './api.js?v=202609251412';
+import * as db from './db.js?v=202609251418';
+import * as api from './api.js?v=202609251418';
 
 const SESSION_KEY = 'pc.session'; // id of the signed-in user (cached profile in IndexedDB)
 const VIA_KEY = 'pc.via'; // 'password' | 'google': how this session was opened

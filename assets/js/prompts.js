@@ -2,8 +2,8 @@
 // Kept in IndexedDB and synced to the account server by sync.js: every local write sets `dirty` (upload pending)
 // and a fresh `updatedAt` (last write wins); deleting leaves a `deleted` tombstone until the server has it.
 
-import * as db from './db.js?v=202609251412';
-import { formatPrompt } from './prompt-spec.js?v=202609251412';
+import * as db from './db.js?v=202609251418';
+import { formatPrompt } from './prompt-spec.js?v=202609251418';
 
 const EDITABLE = ['title', 'promptEn', 'promptFa', 'notes', 'category', 'tags', 'favorite'];
 

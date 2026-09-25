@@ -58,9 +58,9 @@ const ICON_PATHS = {
   google: '<path d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3z" fill="#4285F4" stroke="none"/><path d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853" stroke="none"/><path d="M6.4 14c-.2-.6-.3-1.3-.3-2s.1-1.4.3-2V7.4H3.1A10 10 0 0 0 2 12c0 1.6.4 3.1 1.1 4.6z" fill="#FBBC05" stroke="none"/><path d="M12 6c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.4L6.4 10C7.2 7.7 9.4 6 12 6z" fill="#EA4335" stroke="none"/>',
 };
 
-/** The brand mark (same drawing as assets/img/logo.svg), inline so it inherits theme colors. */
+/** The brand mark (same drawing as assets/img/logo.svg): a speech bubble forming a «P» with a robot inside. Colors come from CSS. */
 export function logoMark(cls = '') {
-  return `<svg class="logo-mark ${cls}" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" class="logo-bg"/><path class="logo-bubble" d="M20 13h24a9 9 0 0 1 9 9v15a9 9 0 0 1-9 9h-4l6 8-13-8H20a9 9 0 0 1-9-9V22a9 9 0 0 1 9-9z"/><path class="logo-star" d="M32 18.5c1.2 6.3 4.7 9.8 11 11-6.3 1.2-9.8 4.7-11 11-1.2-6.3-4.7-9.8-11-11 6.3-1.2 9.8-4.7 11-11z"/></svg>`;
+  return `<svg class="logo-mark ${cls}" viewBox="0 0 64 64" aria-hidden="true"><path class="logo-bubble" d="M12.03 24.85A22 22 0 1 1 28.68 47.35L12.4 60Z"/><path class="logo-head" d="M22.74 35.1A13 13 0 1 1 27.9 40.08L21.8 42.6Z"/><path class="logo-head" d="M33.05 16.2h1.9v-4.8h-1.9z"/><circle class="logo-head" cx="34" cy="9.7" r="2.6"/><ellipse class="logo-eye" cx="29.2" cy="29.0" rx="2.4" ry="3.5"/><ellipse class="logo-eye" cx="38.8" cy="29.0" rx="2.4" ry="3.5"/></svg>`;
 }
 
 export function icon(name, cls = '') {
