@@ -2,7 +2,7 @@
 
 ایده‌ی خامتان را به **فارسی یا انگلیسی** بنویسید؛ Prompt Creator آن را با ادبیات و ساختاری که مدل‌های هوش مصنوعی بهتر می‌فهمند بازنویسی می‌کند و یک **پرامپت حرفه‌ای به انگلیسی، فارسی یا هر دو** تحویل می‌دهد.
 
-**آدرس اجرا:** https://promptsaz.pages.dev/ (نشانی قبلی https://mrasoul10-sudo.github.io/promptcreator/ هم کار می‌کند؛ [راهنمای راه‌اندازی](docs/DEPLOYMENT.md))
+**آدرس اجرا:** https://mrasoul10-sudo.github.io/promptcreator/ و https://promptsaz.pages.dev/ (نشانی `pages.dev` در برخی اینترنت‌های ایران فیلتر است؛ [راهنمای راه‌اندازی](docs/DEPLOYMENT.md))
 
 ## امکانات
 
