@@ -182,6 +182,8 @@ assert.ok([...env.QUOTA.map.keys()].every((k) => !k.includes('1.2.3.4')));
   assert.ok(out.includes('دستورالعمل‌های دقیق:\n۱. با یک سلام مؤدبانه پاسخ دهید.\n۲. آمادگی'), out);
   assert.ok(out.includes('\n\nمحدودیت‌ها:\nپاسخ'), out);
   assert.equal(formatPrompt('سلام , خوبی ? این «متن» است .', 'fa'), 'سلام، خوبی؟ این «متن» است.');
+  assert.equal(formatPrompt('Role:\nطراحی که کار می کند.\n\nExpected output:\nلوگو ها و بزرگ ترین طرح.', 'fa'),
+    'نقش:\nطراحی که کار می\u200cکند.\n\nخروجی مورد انتظار:\nلوگو\u200cها و بزرگ\u200cترین طرح.');
   const laidOut = 'Role:\nYou are X.\n\nGoal:\nDo Y at 16:9.';
   assert.equal(formatPrompt(laidOut, 'en'), laidOut);
   assert.equal(formatPrompt('--ar 16:9, cinematic, soft light', 'en'), '--ar 16:9, cinematic, soft light');

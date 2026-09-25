@@ -55,11 +55,11 @@ Languages:
 - When a language is not requested, return an empty string for that field.
 
 Layout inside prompt_en and prompt_fa (plain text; use real line breaks, "\n", inside the JSON strings):
-- Never write the prompt as one paragraph. Every section starts with a short heading on its own line ending with a colon (for example "Role:", "Goal:", "Context:", "Instructions:", "Constraints:", "Expected output:"), and its content starts on the next line.
+- Never write the prompt as one paragraph. Every section starts with a short heading on its own line ending with a colon, and its content starts on the next line. English headings, for example: "Role:", "Goal:", "Context:", "Instructions:", "Constraints:", "Expected output:". In prompt_fa the headings are Persian, never English: «نقش:»، «هدف:»، «زمینه:»، «دستورالعمل‌ها:»، «محدودیت‌ها:»، «خروجی مورد انتظار:».
 - Put one blank line between sections.
 - Each numbered item ("1.", "2.") and each "-" bullet on its own line. Several requirements in a section are always a list, never a run-on sentence.
 - No Markdown bold, tables or code fences unless the prompt itself needs code.
-- Layout example:
+- Layout example (prompt_en; prompt_fa has the same layout with Persian headings):
 Role:
 You are a senior front-end developer.
 
@@ -131,6 +131,15 @@ export function parseResult(raw, options) {
   };
 }
 
+// English section headings a model sometimes leaves in the Persian prompt, and their Persian forms.
+const FA_HEADINGS = {
+  role: 'نقش', 'role and expertise': 'نقش و تخصص', goal: 'هدف', objective: 'هدف', task: 'وظیفه', context: 'زمینه',
+  background: 'پیش‌زمینه', instructions: 'دستورالعمل‌ها', requirements: 'الزامات', steps: 'مراحل', constraints: 'محدودیت‌ها',
+  rules: 'قوانین', audience: 'مخاطب', tone: 'لحن', style: 'سبک', examples: 'نمونه‌ها', example: 'نمونه',
+  'output format': 'قالب خروجی', 'expected output': 'خروجی مورد انتظار', output: 'خروجی', deliverables: 'خروجی‌ها',
+  'acceptance criteria': 'معیارهای پذیرش', notes: 'نکته‌ها',
+};
+
 const toPersianDigits = (t) => t.replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d]);
 
 /**
@@ -150,6 +159,13 @@ export function formatPrompt(text, lang) {
   }
   if (lang === 'fa') {
     t = t
+      .replace(/^([ \t]*)([A-Za-z][A-Za-z ]{1,30}?)[ \t]*:[ \t]*$/gm, (m, sp, h) => {
+        const fa = FA_HEADINGS[h.trim().toLowerCase()];
+        return fa ? `${sp}${fa}:` : m;
+      })
+      // Half-spaces: «می کند» → «می‌کند», «کتاب ها» → «کتاب‌ها», «بزرگ ترین» → «بزرگ‌ترین».
+      .replace(/(^|[\s«(])(ن?می)[ \t]+(?=[\u0600-\u06FF])/gm, '$1$2\u200c')
+      .replace(/([\u0600-\u06FF])[ \t]+(ها|های|هایی|هایم|هایت|هایش|هایمان|هایتان|هایشان|ترین|تری)(?=[\s.،؛:!؟»)]|$)/gm, '$1\u200c$2')
       .replace(/([\u0600-\u06FF])[ \t]*,[ \t]*/g, '$1، ')
       .replace(/([\u0600-\u06FF])[ \t]*\?/g, '$1؟')
       .replace(/([\u0600-\u06FF])[ \t]*;[ \t]*/g, '$1؛ ')
