@@ -3,9 +3,9 @@
 // Conflicts: the newer `updatedAt` wins; a local edit newer than the server copy is kept and uploaded.
 // Runs after sign-in, after local changes (debounced), when the tab becomes visible, and every minute.
 
-import * as db from './db.js?v=202609251418';
-import * as api from './api.js?v=202609251418';
-import * as auth from './auth.js?v=202609251418';
+import * as db from './db.js?v=202609251442';
+import * as api from './api.js?v=202609251442';
+import * as auth from './auth.js?v=202609251442';
 
 const BATCH_RECORDS = 100;
 const BATCH_BYTES = 1_500_000;

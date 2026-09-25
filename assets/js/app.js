@@ -1,20 +1,20 @@
 // Prompt Creator (پرامپت‌ساز) — single-page app shell, hash router and views. Layout follows a chat-app pattern:
 // a sidebar with recent prompts, a top bar, and a composer-first home page.
 
-import * as auth from './auth.js?v=202609251418';
-import * as prompts from './prompts.js?v=202609251418';
-import * as engine from './engine.js?v=202609251418';
-import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251418';
-import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251418';
-import * as voice from './voice.js?v=202609251418';
-import * as google from './google.js?v=202609251418';
-import * as updates from './updates.js?v=202609251418';
-import * as sync from './sync.js?v=202609251418';
-import * as api from './api.js?v=202609251418';
+import * as auth from './auth.js?v=202609251442';
+import * as prompts from './prompts.js?v=202609251442';
+import * as engine from './engine.js?v=202609251442';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251442';
+import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251442';
+import * as voice from './voice.js?v=202609251442';
+import * as google from './google.js?v=202609251442';
+import * as updates from './updates.js?v=202609251442';
+import * as sync from './sync.js?v=202609251442';
+import * as api from './api.js?v=202609251442';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download, logoMark, enableTooltips,
-} from './ui.js?v=202609251418';
+} from './ui.js?v=202609251442';
 
 const APP_NAME = 'پرامپت‌ساز';
 const view = $('#view');
@@ -157,7 +157,7 @@ async function route() {
     console.error(err);
     view.innerHTML = `<div class="empty">${icon('info', 'icon-lg')}<p>${esc(err.message || 'خطا در نمایش صفحه')}</p></div>`;
   }
-  if (target !== '/studio') window.scrollTo({ top: 0 });
+  if (target !== '/studio') { $('.main')?.scrollTo({ top: 0 }); window.scrollTo({ top: 0 }); }
   if (blocked && ROUTES[path]) {
     if (await openAuthModal({ reason: AUTH_REASONS[path] })) navigate(path);
   }
@@ -224,6 +224,7 @@ async function renderSidebar() {
       </a>
       <button class="icon-btn sb-toggle" data-toggle-sidebar aria-label="باز و بسته کردن منو" data-tip="باز کردن منو">${logoMark('toggle-logo')}${icon('sidebar')}</button>
     </div>
+    <div class="sb-scroll">
     <nav class="sb-nav" aria-label="منوی اصلی">
       <button class="sb-item" id="sb-new" data-tip="پرامپت جدید">${icon('edit')}<span>پرامپت جدید</span></button>
       <a class="sb-item ${active === '/history' ? 'active' : ''}" href="#/history" data-tip="جستجوی پرامپت‌ها">${icon('search')}<span>جستجوی پرامپت‌ها</span></a>
@@ -241,11 +242,11 @@ async function renderSidebar() {
         </div>`}
     </div>
     <nav class="sb-nav sb-secondary" aria-label="راهنما">
-      ${google.inAndroidApp() ? '' : `<a class="sb-item ${active === '/app' ? 'active' : ''}" href="#/app" data-tip="دریافت اپ">${icon('phone')}<span>دریافت اپ اندروید</span></a>`}
       ${auth.isAdmin() ? `<a class="sb-item ${active === '/admin' ? 'active' : ''}" href="#/admin" data-tip="پنل مدیریت">${icon('shield')}<span>پنل مدیریت</span></a>` : ''}
       <a class="sb-item ${active === '/help' ? 'active' : ''}" href="#/help" data-tip="راهنما">${icon('help')}<span>راهنما</span></a>
       <a class="sb-item ${active === '/rules' ? 'active' : ''}" href="#/rules" data-tip="قوانین">${icon('shield')}<span>قوانین</span></a>
     </nav>
+    </div>
     <div class="sb-foot">
       ${user ? `
         <button class="sb-user" id="user-menu-btn" aria-haspopup="menu" aria-expanded="false" data-tip="${esc(user.name)}">
@@ -445,6 +446,7 @@ function renderTopbar() {
       ${user ? '' : `
         <button class="btn btn-primary btn-pill btn-sm" data-login="login">ورود</button>
         <button class="btn btn-outline btn-pill btn-sm tb-signup" data-login="register">ثبت‌نام رایگان</button>`}
+      ${google.inAndroidApp() ? '' : `<a class="icon-btn tb-app" href="#/app" aria-label="دریافت اپ اندروید" title="دریافت اپ اندروید">${icon('phone')}</a>`}
       <button class="icon-btn tb-theme" aria-label="تغییر تم روشن و تیره" title="${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}</button>
       <button class="icon-btn tb-new" aria-label="پرامپت جدید" title="پرامپت جدید">${icon('edit')}</button>
     </div>`;
@@ -452,6 +454,8 @@ function renderTopbar() {
   $$('[data-login]', bar).forEach((b) => b.addEventListener('click', () => openAuthModal({ mode: b.dataset.login })));
   $('.tb-new', bar).addEventListener('click', newPrompt);
   $('.tb-theme', bar).addEventListener('click', () => { toggleTheme(); renderTopbar(); renderSidebar(); });
+  // Not offered on a phone where the app is already installed.
+  if ($('.tb-app', bar)) androidAppInstalled().then((installed) => { if (installed) $('.tb-app', bar)?.remove(); });
 }
 
 // ---------- Auth dialog ----------

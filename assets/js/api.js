@@ -1,6 +1,6 @@
 // Calls to the account/sync server (the worker at FREE_API_URL) with the session token.
 
-import { FREE_API_URL } from './config.js?v=202609251418';
+import { FREE_API_URL } from './config.js?v=202609251442';
 
 const TOKEN_KEY = 'pc.token';
 

@@ -41,7 +41,8 @@ await p.waitForSelector('.modal-backdrop',{state:'detached'});
 await p.waitForSelector('#user-menu-btn');
 const measure = () => p.evaluate(() => {
   const d = document.documentElement;
-  const ox = d.scrollWidth - innerWidth, oy = d.scrollHeight - innerHeight;
+  const main = document.querySelector('.main');
+  const ox = d.scrollWidth - innerWidth, oy = Math.max(d.scrollHeight - innerHeight, main.scrollHeight - main.clientHeight);
   const culprits = [];
   if (ox > 0) for (const el of document.querySelectorAll('body *')) { const r = el.getBoundingClientRect(); if (r.width && (r.right > innerWidth + 1 || r.left < -1)) culprits.push((el.id ? '#' + el.id : el.className.baseVal ?? el.className) + ` [${Math.round(r.left)},${Math.round(r.right)}]`); }
   return { ox, oy, culprits: culprits.slice(0, 6) };
@@ -54,9 +55,14 @@ for (const [w,h] of sizes) {
       await p.goto('http://localhost:8765/' + pg); await p.waitForTimeout(250);
       const m = await measure();
       if (m.ox > 0) report.push(`${w}x${h} ${closed?'rail':'open'} ${pg} OVERFLOW-X ${m.ox}px ${m.culprits.join(' | ')}`);
+      if (w > 860 && pg === '#/help') {
+        // Desktop: the long help page scrolls inside .main, whose scrollbar must be on the left (away from the sidebar).
+        const sb = await p.evaluate(() => { const el = document.querySelector('.main'); return { has: el.scrollHeight > el.clientHeight, left: el.clientLeft, bar: el.offsetWidth - el.clientWidth }; });
+        if (sb.has && !(sb.left > 0 && sb.left === sb.bar)) report.push(`${w}x${h} ${closed?'rail':'open'} content scrollbar not on the left ${JSON.stringify(sb)}`);
+      }
       if (pg === '#/studio' && m.oy > 0) report.push(`${w}x${h} ${closed?'rail':'open'} ${pg} OVERFLOW-Y ${m.oy}px`);
       if (closed && w > 860 && pg === '#/studio') {
-        for (const sel of ['.sb-toggle', '#sb-new', '.sb-secondary a[href="#/app"]', '.sb-secondary a[href="#/rules"]', '#user-menu-btn']) {
+        for (const sel of ['.sb-toggle', '#sb-new', '.sb-secondary a[href="#/help"]', '.sb-secondary a[href="#/rules"]', '#user-menu-btn']) {
           await p.hover(sel);
           const samples = [];
           for (let i = 0; i < 8; i++) { samples.push(await measure()); await p.waitForTimeout(15); }

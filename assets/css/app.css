@@ -202,7 +202,9 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2
 .sb-item:hover, .sb-item.active { background: var(--hover); }
 .sb-item .icon { width: 18px; height: 18px; color: var(--text-2); }
 
-.sb-recent { flex: 1; overflow-y: auto; padding: 4px 8px 12px; scrollbar-width: thin; }
+/* Everything between the header and the account button scrolls as one (menu, recent prompts, help and rules). */
+.sb-scroll { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.sb-recent { flex: 1 0 auto; padding: 4px 8px 12px; }
 .sb-group { margin-top: 14px; }
 .sb-group h3 { padding: 0 10px 4px; font-size: 0.75rem; font-weight: 600; color: var(--text-3); }
 .sb-rail-only { display: none; }
@@ -272,6 +274,12 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2
 .scrim { display: none; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* Desktop: the content area scrolls by itself, so (in RTL) its scrollbar sits on the left, away from the sidebar,
+   instead of the page scrollbar on the right next to it. Phones keep normal page scrolling. */
+@media (min-width: 861px) {
+  .app { height: 100dvh; }
+  .main { height: 100dvh; overflow-y: auto; }
+}
 
 .topbar {
   position: sticky; top: 0; z-index: 20;
