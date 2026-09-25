@@ -1,0 +1,17 @@
+{
+  "name": "promptcreator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Prompt Creator — bilingual (Persian/English) AI prompt builder with history and archive. Static site for GitHub Pages.",
+  "type": "module",
+  "scripts": {
+    "serve": "python3 -m http.server 8765",
+    "test:e2e": "node tests/e2e.mjs",
+    "build:vendor": "node tools/build-vendor.mjs"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "0.128.0",
+    "esbuild": "^0.28.0",
+    "playwright": "^1.56.0"
+  }
+}
