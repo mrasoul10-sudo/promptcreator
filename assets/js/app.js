@@ -1,13 +1,13 @@
 // Prompt Creator — single-page app shell, hash router and views.
 
-import * as auth from './auth.js?v=202609250941';
-import * as prompts from './prompts.js?v=202609250941';
-import * as engine from './engine.js?v=202609250941';
-import * as google from './google.js?v=202609250941';
+import * as auth from './auth.js?v=202609250958';
+import * as prompts from './prompts.js?v=202609250958';
+import * as engine from './engine.js?v=202609250958';
+import * as google from './google.js?v=202609250958';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download,
-} from './ui.js?v=202609250941';
+} from './ui.js?v=202609250958';
 
 const view = $('#view');
 const DRAFT_KEY = 'pc.draft';
