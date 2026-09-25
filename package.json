@@ -9,7 +9,8 @@
     "test:e2e": "node tests/e2e.mjs",
     "build:vendor": "node tools/build-vendor.mjs",
     "bump": "node tools/bump-version.mjs",
-    "test:worker": "node tests/worker.test.mjs"
+    "test:worker": "node tests/worker.test.mjs",
+    "test:responsive": "node tests/responsive.mjs"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "0.128.0",

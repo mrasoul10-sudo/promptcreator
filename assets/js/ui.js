@@ -243,3 +243,45 @@ export function download(filename, text, type = 'application/json') {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// ---------- Tooltips ----------
+
+let tipEl = null;
+
+function hideTooltip() {
+  tipEl?.remove();
+  tipEl = null;
+}
+
+/**
+ * Shows `[data-tip]` labels as a fixed tooltip next to the element, on the side facing the page center,
+ * clamped inside the viewport. `when(el)` decides whether a tooltip is wanted (e.g. only in the collapsed rail).
+ */
+export function enableTooltips(when) {
+  document.addEventListener('mouseover', (e) => {
+    const el = e.target.closest?.('[data-tip]');
+    if (!el || !when(el)) { if (!el) hideTooltip(); return; }
+    if (tipEl?.dataset.for === el.dataset.tip) return;
+    hideTooltip();
+    tipEl = document.createElement('div');
+    tipEl.className = 'tooltip';
+    tipEl.setAttribute('role', 'tooltip');
+    tipEl.dataset.for = el.dataset.tip;
+    tipEl.textContent = el.dataset.tip;
+    document.body.appendChild(tipEl);
+    const r = el.getBoundingClientRect();
+    const t = tipEl.getBoundingClientRect();
+    const gap = 10;
+    const toLeft = r.left + r.width / 2 > innerWidth / 2;
+    let x = toLeft ? r.left - gap - t.width : r.right + gap;
+    let y = r.top + r.height / 2 - t.height / 2;
+    x = Math.min(Math.max(8, x), innerWidth - t.width - 8);
+    y = Math.min(Math.max(8, y), innerHeight - t.height - 8);
+    tipEl.style.left = `${Math.round(x)}px`;
+    tipEl.style.top = `${Math.round(y)}px`;
+  });
+  document.addEventListener('mouseout', (e) => {
+    if (!e.relatedTarget || !e.target.closest?.('[data-tip]')?.contains(e.relatedTarget)) hideTooltip();
+  });
+  ['scroll', 'resize', 'click', 'keydown'].forEach((type) => addEventListener(type, hideTooltip, true));
+}

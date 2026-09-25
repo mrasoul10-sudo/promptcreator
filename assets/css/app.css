@@ -105,6 +105,8 @@
 
 html { -webkit-text-size-adjust: 100%; }
 
+html, body { overflow-x: clip; }
+
 body {
   margin: 0;
   min-height: 100dvh;
@@ -160,7 +162,6 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2
   transition: width 0.2s var(--ease), transform 0.25s var(--ease);
 }
 /* Collapsed on desktop: an icon rail (labels shown as tooltips), like chat apps. */
-.sidebar [data-tip] { position: relative; }
 @media (min-width: 861px) {
   body.sidebar-closed .sidebar { width: 60px; }
   body.sidebar-closed .sb-head { flex-direction: column; padding: 10px 0 6px; }
@@ -178,13 +179,6 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2
   body.sidebar-closed .sb-foot { display: flex; justify-content: center; border-top: 0; padding: 8px 0 12px; }
   body.sidebar-closed .sb-user { width: 40px; height: 40px; justify-content: center; padding: 0; }
   body.sidebar-closed .user-menu { inset-inline: 8px auto; width: 240px; }
-  body.sidebar-closed .sidebar { overflow: visible; }
-  body.sidebar-closed .sb-foot [data-tip]:hover::after { top: auto; bottom: 6px; transform: none; }
-  body.sidebar-closed .sidebar [data-tip]:hover::after {
-    content: attr(data-tip); position: absolute; z-index: 50; inset-inline-start: calc(100% + 10px); top: 50%; transform: translateY(-50%);
-    padding: 5px 10px; border-radius: 8px; background: var(--primary); color: var(--on-primary);
-    font-size: 0.8rem; font-weight: 600; white-space: nowrap; pointer-events: none; animation: tip-in 0.12s ease-out both;
-  }
 }
 
 .sb-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 10px 10px 6px 8px; }
@@ -232,7 +226,14 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2
   padding: 6px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-lg);
   animation: menu-in 0.16s var(--ease) both;
 }
-/* Opacity only: a moving tooltip near the screen edge would briefly overflow the page and make it scroll. */
+/* Tooltip: one fixed-position element placed by JS (ui.js) and clamped inside the viewport, so it can never
+   add scrollbars or be cut off at a screen edge. Opacity-only animation. */
+.tooltip {
+  position: fixed; z-index: 70; max-width: min(260px, calc(100vw - 16px));
+  padding: 5px 10px; border-radius: 8px; background: var(--primary); color: var(--on-primary);
+  font-size: 0.8rem; font-weight: 600; line-height: 1.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  pointer-events: none; animation: tip-in 0.12s ease-out both;
+}
 @keyframes tip-in { from { opacity: 0; } }
 @keyframes menu-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
 .user-menu-head { padding: 8px 10px; font-size: 0.8rem; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
