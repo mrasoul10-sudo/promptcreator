@@ -75,7 +75,6 @@ jobs:
           URL="${DEPLOY_URL%/}"
           if [ -z "$URL" ]; then echo "::warning::Could not read the worker URL"; exit 0; fi
           echo "Worker URL: $URL"
-          curl -fsS "$URL/health" || true
           if grep -q "FREE_API_URL = '$URL'" assets/js/config.js; then echo "config.js already up to date"; exit 0; fi
           sed -i "s|^export const FREE_API_URL = .*|export const FREE_API_URL = '$URL';|" assets/js/config.js
           node tools/bump-version.mjs
@@ -84,3 +83,23 @@ jobs:
           git add assets/js index.html
           git commit -m "Point the site at the free API: $URL"
           git push
+
+      - name: Smoke test (live worker + Gemini)
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          URL="${DEPLOY_URL%/}"
+          [ -z "$URL" ] && { echo "::warning::No worker URL"; exit 0; }
+          # A new workers.dev subdomain can take a minute or two to start answering.
+          for i in $(seq 1 18); do
+            if curl -fsS "$URL/health"; then echo; break; fi
+            echo "waiting for $URL ($i)"; sleep 10
+          done
+          code=$(curl -sS -o /tmp/out.json -w '%{http_code}' -X POST "$URL/generate" \
+            -H 'content-type: application/json' -H 'origin: https://mrasoul10-sudo.github.io' \
+            -d '{"source":"یک لوگوی مینیمال برای کافه با رنگ‌های گرم","type":"image","lang":"both","detail":"concise"}')
+          echo "HTTP $code"
+          head -c 3000 /tmp/out.json; echo
+          if [ "$code" != "200" ]; then echo "::error::Live /generate returned HTTP $code"; exit 1; fi
+          node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/out.json","utf8")).result; if(!r.promptEn||!r.promptFa){console.error("empty prompt");process.exit(1)}'
