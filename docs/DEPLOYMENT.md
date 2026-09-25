@@ -18,6 +18,22 @@
 
 > ریپازیتوری باید **Public** باشد (در حساب رایگان گیت‌هاب، Pages برای ریپازیتوری خصوصی در دسترس نیست).
 
+## ورود با گوگل (اختیاری)
+
+دکمه «ادامه با گوگل» فقط وقتی نمایش داده می‌شود که یک **Client ID** گوگل در فایل `assets/js/config.js` قرار گرفته باشد. این شناسه عمومی است و محرمانه نیست.
+
+1. به <https://console.cloud.google.com/> بروید و یک پروژه بسازید یا پروژه‌ای را انتخاب کنید.
+2. **APIs & Services → OAuth consent screen**: نوع **External** را انتخاب کنید، نام برنامه (Prompt Creator) و ایمیل را وارد کنید و در آخر **Publish app** را بزنید.
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID**:
+   - Application type: **Web application**
+   - **Authorized JavaScript origins**: `https://mrasoul10-sudo.github.io` (و برای تست محلی `http://localhost:8765`)
+   - Redirect URI لازم نیست.
+4. Client ID ساخته‌شده (به شکل `xxxx.apps.googleusercontent.com`) را در `assets/js/config.js` بگذارید:
+   ```js
+   export const GOOGLE_CLIENT_ID = 'xxxx.apps.googleusercontent.com';
+   ```
+5. تغییر را commit و push کنید.
+
 ## کلید API
 
 برای ساخت پرامپت، هر کاربر باید کلید API خودش را در صفحه «تنظیمات» برنامه وارد کند:

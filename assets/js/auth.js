@@ -19,6 +19,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
 const AVATAR_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f97316', '#10b981', '#0ea5e9', '#14b8a6', '#f43f5e'];
 
 let current = null;
+// True when the current session was opened with Google; lets a user who forgot their password set a new one.
+let viaGoogle = false;
+
+const RECOVERY_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function toHex(buffer) {
   return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -101,8 +105,39 @@ export async function register({ name, email, password, remember = true }) {
   return user;
 }
 
+function normalizeCode(code) {
+  return String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/** Creates (or replaces) the account's one-time recovery code and returns it for display. Only its hash is stored. */
+export async function createRecoveryCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  const raw = [...bytes].map((b) => RECOVERY_ALPHABET[b % RECOVERY_ALPHABET.length]).join('');
+  const salt = randomSalt();
+  await save({ recoverySalt: salt, recoveryHash: await hashPassword(raw, salt) });
+  return raw.match(/.{4}/g).join('-');
+}
+
+export function hasRecoveryCode() {
+  return Boolean(current?.recoveryHash);
+}
+
+/** Resets a forgotten password with the recovery code; signs the user in and returns a fresh recovery code. */
+export async function resetPassword({ email, code, password, remember = true }) {
+  const user = await db.getByIndex('users', 'email', normalizeEmail(email));
+  const valid = user?.recoveryHash && (await hashPassword(normalizeCode(code), user.recoverySalt)) === user.recoveryHash;
+  if (!valid) throw new Error('ایمیل یا کد بازیابی اشتباه است.');
+  validate({ password });
+  const salt = randomSalt();
+  current = { ...user, salt, passHash: await hashPassword(password, salt), updatedAt: Date.now() };
+  await db.put('users', current);
+  persistSession(current.id, remember);
+  return createRecoveryCode();
+}
+
 export async function login({ email, password, remember = true }) {
   const user = await db.getByIndex('users', 'email', normalizeEmail(email));
+  if (user && !user.passHash) throw new Error('این حساب با گوگل ساخته شده است؛ با دکمه «ادامه با گوگل» وارد شوید.');
   if (!user || (await hashPassword(String(password || ''), user.salt)) !== user.passHash) {
     throw new Error('ایمیل یا رمز عبور اشتباه است.');
   }
@@ -111,8 +146,62 @@ export async function login({ email, password, remember = true }) {
   return user;
 }
 
+/**
+ * Signs in with a Google profile (from google.parseCredential). Links to an existing local account with the
+ * same email, otherwise creates a password-less account.
+ */
+export async function loginWithGoogle(profile, { remember = true } = {}) {
+  const email = normalizeEmail(profile.email);
+  let user = await db.getByIndex('users', 'email', email);
+  if (user) {
+    if (user.googleSub && user.googleSub !== profile.sub) throw new Error('این ایمیل به حساب گوگل دیگری متصل است.');
+    user = { ...user, googleSub: profile.sub, avatar: user.avatar || (await pictureToAvatar(profile.picture)), updatedAt: Date.now() };
+  } else {
+    user = {
+      id: db.uid(),
+      name: profile.name.trim().slice(0, 80) || email.split('@')[0],
+      email,
+      salt: null,
+      passHash: null,
+      googleSub: profile.sub,
+      avatar: await pictureToAvatar(profile.picture),
+      color: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
+      settings: { ...DEFAULT_SETTINGS },
+      createdAt: Date.now(),
+    };
+  }
+  await db.put('users', user);
+  current = user;
+  viaGoogle = true;
+  persistSession(user.id, remember);
+  return user;
+}
+
+/** Copies the Google profile photo into a local data URL; falls back to the remote URL if CORS blocks it. */
+async function pictureToAvatar(url) {
+  if (!url) return null;
+  try {
+    const res = await fetch(url, { mode: 'cors', referrerPolicy: 'no-referrer' });
+    if (!res.ok) throw new Error();
+    const blob = await res.blob();
+    return await imageFileToAvatar(new File([blob], 'google.jpg', { type: blob.type || 'image/jpeg' }));
+  } catch {
+    return url;
+  }
+}
+
+export function hasPassword() {
+  return Boolean(current?.passHash);
+}
+
+/** Whether changing the password needs the old one (not for Google-only accounts or a Google-opened session). */
+export function needsOldPassword() {
+  return Boolean(current?.passHash) && !viaGoogle;
+}
+
 export function logout() {
   current = null;
+  viaGoogle = false;
   try {
     localStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(SESSION_KEY);
@@ -141,7 +230,8 @@ export async function updateSettings(patch) {
 }
 
 export async function changePassword(oldPassword, newPassword) {
-  if ((await hashPassword(String(oldPassword || ''), current.salt)) !== current.passHash) {
+  // Google-only accounts, or sessions opened with Google (forgot-password path), may set one without the old password.
+  if (needsOldPassword() && (await hashPassword(String(oldPassword || ''), current.salt)) !== current.passHash) {
     throw new Error('رمز عبور فعلی اشتباه است.');
   }
   validate({ password: newPassword });
@@ -153,10 +243,12 @@ export async function setAvatar(dataUrl) {
   return save({ avatar: dataUrl });
 }
 
-export async function deleteAccount(password) {
-  if ((await hashPassword(String(password || ''), current.salt)) !== current.passHash) {
-    throw new Error('رمز عبور اشتباه است.');
-  }
+/** `confirmation` is the password, or the account email for Google-only accounts. */
+export async function deleteAccount(confirmation) {
+  const ok = current.passHash
+    ? (await hashPassword(String(confirmation || ''), current.salt)) === current.passHash
+    : normalizeEmail(confirmation) === current.email;
+  if (!ok) throw new Error(current.passHash ? 'رمز عبور اشتباه است.' : 'ایمیل وارد شده با ایمیل حساب یکسان نیست.');
   const prompts = await db.getAllByIndex('prompts', 'userId', current.id);
   await db.removeMany('prompts', prompts.map((p) => p.id));
   await db.remove('users', current.id);

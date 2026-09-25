@@ -3,6 +3,7 @@
 import * as auth from './auth.js';
 import * as prompts from './prompts.js';
 import * as engine from './engine.js';
+import * as google from './google.js';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download,
@@ -46,14 +47,20 @@ try { applyTheme(localStorage.getItem(THEME_KEY)); } catch { /* ignore */ }
 
 // ---------- Router ----------
 
+// Every page except the studio needs an account; the studio (home) is open to guests.
 const ROUTES = {
-  '/studio': { render: renderStudio, title: 'ساخت پرامپت', auth: true },
+  '/studio': { render: renderStudio, title: 'ساخت پرامپت', auth: false },
   '/history': { render: renderHistory, title: 'تاریخچه', auth: true },
   '/archive': { render: renderArchive, title: 'آرشیو', auth: true },
   '/profile': { render: renderProfile, title: 'حساب کاربری', auth: true },
   '/settings': { render: renderSettings, title: 'تنظیمات', auth: true },
-  '/login': { render: () => renderAuth('login'), title: 'ورود', auth: false },
-  '/register': { render: () => renderAuth('register'), title: 'ثبت‌نام', auth: false },
+};
+
+const AUTH_REASONS = {
+  '/history': 'برای دیدن تاریخچه پرامپت‌هایتان وارد شوید.',
+  '/archive': 'برای دسترسی به آرشیو وارد شوید.',
+  '/profile': 'برای مدیریت حساب کاربری وارد شوید.',
+  '/settings': 'برای تنظیمات وارد شوید.',
 };
 
 function parseHash() {
@@ -71,13 +78,12 @@ async function route() {
   const { path, params } = parseHash();
   const user = auth.currentUser();
   let target = ROUTES[path] ? path : '/studio';
-  if (ROUTES[target].auth && !user) target = '/login';
-  if (!ROUTES[target].auth && user) target = '/studio';
+  const blocked = ROUTES[target].auth && !user;
+  if (blocked) target = '/studio';
   if (target !== path) {
     history.replaceState(null, '', `#${target}`);
   }
   document.title = `${ROUTES[target].title} · Prompt Creator`;
-  document.body.classList.toggle('auth-mode', !ROUTES[target].auth);
   renderChrome(target);
   view.classList.remove('view-enter');
   void view.offsetWidth; // restart the enter animation
@@ -90,6 +96,9 @@ async function route() {
   }
   view.focus({ preventScroll: true });
   window.scrollTo({ top: 0 });
+  if (blocked && ROUTES[path]) {
+    if (await openAuthModal({ reason: AUTH_REASONS[path] })) navigate(path);
+  }
 }
 
 window.addEventListener('hashchange', route);
@@ -107,15 +116,16 @@ function renderChrome(active = parseHash().path) {
   const user = auth.currentUser();
   const sidebar = $('#sidebar');
   const bottom = $('#bottom-nav');
-  if (!user) {
-    sidebar.innerHTML = '';
-    bottom.innerHTML = '';
-    return;
-  }
   const links = NAV.map((n) => `
     <a href="#${n.path}" class="nav-link ${active === n.path ? 'active' : ''}" ${active === n.path ? 'aria-current="page"' : ''}>
       ${icon(n.icon)}<span>${n.label}</span>
     </a>`).join('');
+  const account = user
+    ? `<a href="#/profile" class="user-chip ${active === '/profile' ? 'active' : ''}">
+        ${avatarHtml(user, 'sm')}
+        <span class="user-meta"><strong>${esc(user.name)}</strong><small>${esc(user.email)}</small></span>
+      </a>`
+    : `<button class="btn btn-primary btn-block" data-login>${icon('user')}<span>ورود / ثبت‌نام</span></button>`;
   sidebar.innerHTML = `
     <a class="brand" href="#/studio" aria-label="Prompt Creator">
       <span class="brand-mark">${icon('wand')}</span>
@@ -124,81 +134,170 @@ function renderChrome(active = parseHash().path) {
     <nav class="nav" aria-label="منوی اصلی">${links}</nav>
     <div class="sidebar-foot">
       <button class="icon-btn" id="theme-toggle" aria-label="تغییر تم" title="تغییر تم">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}</button>
-      <a href="#/profile" class="user-chip ${active === '/profile' ? 'active' : ''}">
-        ${avatarHtml(user, 'sm')}
-        <span class="user-meta"><strong>${esc(user.name)}</strong><small>${esc(user.email)}</small></span>
-      </a>
+      ${account}
     </div>`;
   bottom.innerHTML = `${NAV.map((n) => `
     <a href="#${n.path}" class="${active === n.path ? 'active' : ''}" aria-label="${n.label}">${icon(n.icon)}<span>${n.short || n.label}</span></a>`).join('')}
-    <a href="#/profile" class="${active === '/profile' ? 'active' : ''}" aria-label="حساب کاربری">${avatarHtml(user, 'xs')}<span>حساب</span></a>`;
+    ${user
+      ? `<a href="#/profile" class="${active === '/profile' ? 'active' : ''}" aria-label="حساب کاربری">${avatarHtml(user, 'xs')}<span>حساب</span></a>`
+      : `<button type="button" data-login aria-label="ورود">${icon('user')}<span>ورود</span></button>`}`;
   $('#theme-toggle').addEventListener('click', toggleTheme);
+  $$('[data-login]').forEach((b) => b.addEventListener('click', () => openAuthModal()));
   paintAvatars(sidebar);
   paintAvatars(bottom);
 }
 
-// ---------- Auth ----------
+// ---------- Auth modal ----------
 
-function renderAuth(mode) {
-  const isLogin = mode === 'login';
-  view.innerHTML = `
-    <section class="auth">
-      <div class="auth-hero">
-        <span class="brand-mark brand-mark-lg">${icon('wand')}</span>
-        <h1>Prompt Creator</h1>
-        <p>ایده‌ی خامتان را به فارسی یا انگلیسی بنویسید؛ پرامپتی حرفه‌ای با ادبیات هوش مصنوعی به هر دو زبان تحویل بگیرید.</p>
-        <ul class="hero-points">
-          <li>${icon('sparkles')} بازنویسی و ترجمه هوشمند فارسی ⇄ انگلیسی</li>
-          <li>${icon('history')} ذخیره خودکار همه پرامپت‌ها در تاریخچه</li>
-          <li>${icon('archive')} آرشیو با برچسب، پوشه و جستجوی پیشرفته</li>
-        </ul>
-      </div>
-      <form class="card auth-card" id="auth-form" novalidate>
-        <h2>${isLogin ? 'ورود به حساب' : 'ساخت حساب جدید'}</h2>
-        <p class="muted">${isLogin ? 'خوش برگشتید!' : 'فقط چند ثانیه طول می‌کشد.'}</p>
-        ${isLogin ? '' : `
-        <label class="field"><span>نام</span>
-          <input name="name" autocomplete="name" required minlength="2" placeholder="مثلاً رسول"></label>`}
-        <label class="field"><span>ایمیل</span>
-          <input name="email" type="email" dir="ltr" autocomplete="email" required placeholder="you@example.com"></label>
-        <label class="field"><span>رمز عبور</span>
-          <input name="password" type="password" dir="ltr" autocomplete="${isLogin ? 'current-password' : 'new-password'}" required minlength="6" placeholder="حداقل ۶ کاراکتر"></label>
-        <label class="check"><input type="checkbox" name="remember" checked><span>مرا به خاطر بسپار</span></label>
-        <p class="form-error" role="alert" hidden></p>
-        <button class="btn btn-primary btn-block" type="submit">${isLogin ? 'ورود' : 'ثبت‌نام و شروع'}</button>
-        <p class="auth-switch">${isLogin
-          ? 'حساب ندارید؟ <a href="#/register">ثبت‌نام کنید</a>'
-          : 'قبلاً ثبت‌نام کرده‌اید؟ <a href="#/login">وارد شوید</a>'}</p>
-        <p class="auth-note">${icon('info')} حساب و اطلاعات شما فقط در همین مرورگر ذخیره می‌شود. برای انتقال به دستگاه دیگر از «پشتیبان‌گیری» در تنظیمات استفاده کنید.</p>
-      </form>
-    </section>`;
+let authOpen = null;
 
-  const form = $('#auth-form');
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const data = Object.fromEntries(new FormData(form));
-    const errorBox = $('.form-error', form);
-    const button = $('button[type=submit]', form);
-    errorBox.hidden = true;
-    button.disabled = true;
-    button.classList.add('loading');
-    try {
-      const payload = { ...data, remember: Boolean(data.remember) };
-      if (isLogin) await auth.login(payload);
-      else await auth.register(payload);
-      toast(isLogin ? `خوش آمدید ${auth.currentUser().name}` : 'حساب شما ساخته شد', 'success');
-      navigate('/studio');
-    } catch (err) {
-      errorBox.textContent = err.message;
-      errorBox.hidden = false;
-      form.classList.remove('shake');
-      void form.offsetWidth;
-      form.classList.add('shake');
-    } finally {
-      button.disabled = false;
-      button.classList.remove('loading');
-    }
+/** Shows a one-time recovery code; the user needs it if they forget their password. */
+function showRecoveryCode(code, { fresh = true } = {}) {
+  return modal({
+    title: 'کد بازیابی رمز عبور',
+    size: 'modal-sm',
+    body: `
+      <p class="confirm-text">${fresh ? 'حساب شما ساخته شد. ' : ''}اگر رمز عبور را فراموش کنید، فقط با این کد می‌توانید رمز جدید بگذارید. آن را در جای امنی نگه دارید؛ دوباره نمایش داده نمی‌شود.</p>
+      <div class="recovery-code" dir="ltr">${esc(code)}</div>
+      <div class="form-actions start">
+        <button type="button" class="btn btn-soft btn-sm" id="copy-code">${icon('copy')} کپی</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="save-code">${icon('download')} ذخیره در فایل</button>
+      </div>`,
+    actions: [{ label: 'ذخیره کردم', class: 'btn-primary', value: true }],
+    onMount: (root) => {
+      $('#copy-code', root).addEventListener('click', (e) => copyText(code, e.currentTarget));
+      $('#save-code', root).addEventListener('click', () => download('promptcreator-recovery-code.txt', `Prompt Creator\n${auth.currentUser()?.email || ''}\nRecovery code: ${code}\n`, 'text/plain'));
+    },
   });
+}
+
+/**
+ * Opens the sign-in / sign-up dialog. Resolves true once the user is signed in, false if dismissed.
+ * The current page is re-rendered after a successful sign-in.
+ */
+function openAuthModal({ mode = 'login', reason = '' } = {}) {
+  if (authOpen) return authOpen;
+  let signedIn = false;
+  let recoveryCode = null;
+  authOpen = modal({
+    title: 'ورود به Prompt Creator',
+    size: 'modal-auth',
+    body: `
+      <div class="auth-dialog">
+        <div class="auth-intro">
+          <span class="brand-mark">${icon('wand')}</span>
+          <p>${esc(reason || 'برای ساخت و ذخیره پرامپت‌ها وارد حساب خود شوید یا در چند ثانیه حساب بسازید.')}</p>
+        </div>
+        ${google.enabled() ? `
+          <div class="google-slot" id="google-slot"><div class="skeleton google-skeleton"></div></div>
+          <div class="divider"><span>یا با ایمیل</span></div>` : ''}
+        <div class="tabs auth-tabs" role="tablist">
+          <button type="button" role="tab" class="tab ${mode === 'login' ? 'active' : ''}" data-mode="login">ورود</button>
+          <button type="button" role="tab" class="tab ${mode === 'register' ? 'active' : ''}" data-mode="register">ثبت‌نام</button>
+        </div>
+        <form id="auth-form" novalidate>
+          <label class="field" data-only="register"><span>نام</span>
+            <input name="name" autocomplete="name" minlength="2" placeholder="مثلاً رسول"></label>
+          <label class="field"><span>ایمیل</span>
+            <input name="email" type="email" dir="ltr" autocomplete="email" required placeholder="you@example.com"></label>
+          <label class="field" data-only="forgot"><span>کد بازیابی</span>
+            <input name="code" dir="ltr" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX"></label>
+          <label class="field"><span data-label="password">رمز عبور</span>
+            <input name="password" type="password" dir="ltr" autocomplete="current-password" required minlength="6" placeholder="حداقل ۶ کاراکتر"></label>
+          <div class="auth-row">
+            <label class="check"><input type="checkbox" name="remember" checked><span>مرا به خاطر بسپار</span></label>
+            <button type="button" class="link-btn" data-only="login" id="forgot-link">رمز را فراموش کرده‌اید؟</button>
+          </div>
+          <p class="auth-hint" data-only="forgot">${icon('info')} کد بازیابی هنگام ثبت‌نام به شما داده شده است. ${google.enabled() ? 'اگر ایمیل حسابتان همان ایمیل گوگل است، می‌توانید با «ادامه با گوگل» وارد شوید و از صفحه حساب کاربری رمز جدید بگذارید.' : ''}</p>
+          <p class="form-error" role="alert" hidden></p>
+          <button class="btn btn-primary btn-block" type="submit"></button>
+        </form>
+        <p class="auth-note">${icon('info')} حساب و اطلاعات شما فقط در همین مرورگر ذخیره می‌شود. برای انتقال به دستگاه دیگر از «پشتیبان‌گیری» در تنظیمات استفاده کنید.</p>
+      </div>`,
+    onMount: (root, close) => {
+      const form = $('#auth-form', root);
+      const errorBox = $('.form-error', form);
+      const submit = $('button[type=submit]', form);
+      let current = mode;
+
+      const showError = (message) => {
+        errorBox.textContent = message;
+        errorBox.hidden = false;
+        form.classList.remove('shake');
+        void form.offsetWidth;
+        form.classList.add('shake');
+      };
+      const done = (user, isNew) => {
+        signedIn = true;
+        toast(isNew ? 'حساب شما ساخته شد' : `خوش آمدید ${user.name}`, 'success');
+        close(true);
+      };
+      const setMode = (m) => {
+        current = m;
+        $$('.auth-tabs .tab', root).forEach((t) => t.classList.toggle('active', t.dataset.mode === m));
+        $$('[data-only]', form).forEach((el) => { el.hidden = el.dataset.only !== m; });
+        $('input[name=name]', form).required = m === 'register';
+        $('input[name=code]', form).required = m === 'forgot';
+        $('input[name=password]', form).autocomplete = m === 'login' ? 'current-password' : 'new-password';
+        $('[data-label=password]', form).textContent = m === 'forgot' ? 'رمز عبور جدید' : 'رمز عبور';
+        submit.textContent = { login: 'ورود', register: 'ساخت حساب', forgot: 'تعیین رمز جدید و ورود' }[m];
+        errorBox.hidden = true;
+      };
+      setMode(mode);
+      $$('.auth-tabs .tab', root).forEach((t) => t.addEventListener('click', () => setMode(t.dataset.mode)));
+      $('#forgot-link', form).addEventListener('click', () => setMode('forgot'));
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(form));
+        errorBox.hidden = true;
+        submit.disabled = true;
+        submit.classList.add('loading');
+        try {
+          const payload = { ...data, remember: Boolean(data.remember) };
+          if (current === 'forgot') {
+            recoveryCode = { code: await auth.resetPassword(payload), fresh: false };
+            toast('رمز عبور جدید ثبت شد', 'success');
+            signedIn = true;
+            close(true);
+            return;
+          }
+          const user = current === 'register' ? await auth.register(payload) : await auth.login(payload);
+          if (current === 'register') recoveryCode = { code: await auth.createRecoveryCode(), fresh: true };
+          done(user, current === 'register');
+        } catch (err) {
+          showError(err.message);
+        } finally {
+          submit.disabled = false;
+          submit.classList.remove('loading');
+        }
+      });
+
+      const slot = $('#google-slot', root);
+      if (slot) {
+        google.renderButton(slot, async (credential) => {
+          try {
+            const existed = Boolean(auth.currentUser());
+            const user = await auth.loginWithGoogle(google.parseCredential(credential), { remember: Boolean($('input[name=remember]', form).checked) });
+            done(user, !existed && Date.now() - user.createdAt < 5000);
+          } catch (err) {
+            showError(err.message);
+          }
+        }, { theme: currentTheme() }).catch((err) => {
+          slot.innerHTML = `<p class="muted small"></p>`;
+          $('p', slot).textContent = err.message;
+        });
+      }
+    },
+  }).then(async () => {
+    authOpen = null;
+    if (signedIn) {
+      route();
+      if (recoveryCode) await showRecoveryCode(recoveryCode.code, { fresh: recoveryCode.fresh });
+    }
+    return signedIn;
+  });
+  return authOpen;
 }
 
 // ---------- Studio ----------
@@ -225,16 +324,26 @@ function renderStudio() {
   const s = auth.settings();
   const draft = readDraft() || { source: '', type: s.defaultType, lang: s.defaultLang, detail: s.defaultDetail };
   const user = auth.currentUser();
-  const firstName = esc(String(user.name).split(/\s+/)[0]);
 
   view.innerHTML = `
+    ${user ? `
     <header class="page-head">
       <div>
-        <h1>سلام ${firstName} 👋</h1>
+        <h1>سلام ${esc(String(user.name).split(/\s+/)[0])} 👋</h1>
         <p class="muted">ایده، درخواست یا پرامپت خامتان را بنویسید تا به یک پرامپت حرفه‌ای تبدیل شود.</p>
       </div>
-    </header>
-    ${s.apiKey ? '' : `
+    </header>` : `
+    <header class="hero">
+      <span class="brand-mark brand-mark-lg">${icon('wand')}</span>
+      <h1>چه پرامپتی می‌خواهید بسازید؟</h1>
+      <p class="muted">ایده‌ی خامتان را به فارسی یا انگلیسی بنویسید؛ پرامپتی حرفه‌ای با ادبیات هوش مصنوعی به هر دو زبان تحویل بگیرید.</p>
+      <ul class="hero-points">
+        <li>${icon('sparkles')} بازنویسی و ترجمه فارسی ⇄ انگلیسی</li>
+        <li>${icon('history')} ذخیره خودکار در تاریخچه</li>
+        <li>${icon('archive')} آرشیو با جستجوی پیشرفته</li>
+      </ul>
+    </header>`}
+    ${!user || s.apiKey ? '' : `
       <div class="banner">${icon('key')}
         <div><strong>کلید API هنوز تنظیم نشده است.</strong>
         <span>برای ساخت پرامپت، کلید API خود از Anthropic را در تنظیمات وارد کنید.</span></div>
@@ -359,6 +468,10 @@ async function runGeneration() {
     toast('ابتدا متنی بنویسید', 'error');
     $('#source').focus();
     return;
+  }
+  if (!auth.currentUser()) {
+    // Guests can write freely; signing in is asked for only when they generate. The draft is kept.
+    if (!(await openAuthModal({ reason: 'برای ساخت پرامپت و ذخیره آن در تاریخچه، وارد شوید یا حساب بسازید.' }))) return;
   }
   const s = auth.settings();
   if (!s.apiKey) {
@@ -896,12 +1009,19 @@ async function renderProfile() {
         <button class="btn btn-primary" type="submit">ذخیره تغییرات</button>
       </form>
       <form class="card" id="password-form">
-        <h2 class="card-title">${icon('key')} تغییر رمز عبور</h2>
-        <label class="field"><span>رمز فعلی</span><input name="old" type="password" dir="ltr" autocomplete="current-password" required></label>
+        <h2 class="card-title">${icon('key')} ${auth.hasPassword() ? 'تغییر رمز عبور' : 'تعیین رمز عبور'}</h2>
+        ${auth.hasPassword() ? '' : '<p class="muted small">حساب شما با گوگل ساخته شده است. با تعیین رمز، با ایمیل هم می‌توانید وارد شوید.</p>'}
+        ${auth.needsOldPassword() ? '<label class="field"><span>رمز فعلی</span><input name="old" type="password" dir="ltr" autocomplete="current-password" required></label>' : ''}
         <label class="field"><span>رمز جدید</span><input name="new" type="password" dir="ltr" autocomplete="new-password" minlength="6" required></label>
-        <button class="btn btn-primary" type="submit">تغییر رمز</button>
+        <button class="btn btn-primary" type="submit">${auth.hasPassword() ? 'تغییر رمز' : 'تعیین رمز'}</button>
       </form>
     </div>
+    ${auth.hasPassword() ? `
+    <section class="card">
+      <h2 class="card-title">${icon('key')} کد بازیابی رمز عبور</h2>
+      <p class="muted small">${auth.hasRecoveryCode() ? 'اگر کد بازیابی را گم کرده‌اید، یک کد جدید بسازید؛ کد قبلی باطل می‌شود.' : 'هنوز کد بازیابی ندارید. بدون آن، در صورت فراموشی رمز، راهی برای بازیابی حساب وجود ندارد.'}</p>
+      <div class="form-actions start"><button class="btn btn-soft btn-sm" id="new-recovery">ساخت کد بازیابی جدید</button></div>
+    </section>` : ''}
     <section class="card danger-zone">
       <h2 class="card-title">${icon('trash')} حذف حساب</h2>
       <p class="muted">حساب و همه پرامپت‌های آن برای همیشه از این مرورگر حذف می‌شود. پیش از آن از تنظیمات پشتیبان بگیرید.</p>
@@ -915,7 +1035,7 @@ async function renderProfile() {
     auth.logout();
     studio.result = null;
     toast('از حساب خارج شدید');
-    navigate('/login');
+    navigate('/studio');
   });
   $('#avatar-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
@@ -946,19 +1066,27 @@ async function renderProfile() {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.target));
     try {
+      const first = !auth.hasPassword();
       await auth.changePassword(data.old, data.new);
-      e.target.reset();
-      toast('رمز عبور تغییر کرد', 'success');
+      toast(first ? 'رمز عبور تعیین شد' : 'رمز عبور تغییر کرد', 'success');
+      if (first || !auth.hasRecoveryCode()) await showRecoveryCode(await auth.createRecoveryCode(), { fresh: false });
+      route();
     } catch (err) {
       toast(err.message, 'error');
     }
   });
+  $('#new-recovery')?.addEventListener('click', async () => {
+    if (auth.hasRecoveryCode() && !(await confirmDialog('کد بازیابی قبلی باطل می‌شود. ادامه می‌دهید؟', { title: 'کد بازیابی جدید' }))) return;
+    await showRecoveryCode(await auth.createRecoveryCode(), { fresh: false });
+    route();
+  });
   $('#delete-account').addEventListener('click', async () => {
+    const withPassword = auth.hasPassword();
     const password = await modal({
       title: 'حذف حساب',
       size: 'modal-sm',
-      body: `<p class="confirm-text">برای تأیید، رمز عبور خود را وارد کنید. این کار قابل بازگشت نیست.</p>
-        <label class="field"><span>رمز عبور</span><input id="confirm-pass" type="password" dir="ltr" autocomplete="current-password"></label>`,
+      body: `<p class="confirm-text">برای تأیید، ${withPassword ? 'رمز عبور' : 'ایمیل حساب'} خود را وارد کنید. این کار قابل بازگشت نیست.</p>
+        <label class="field"><span>${withPassword ? 'رمز عبور' : 'ایمیل'}</span><input id="confirm-pass" type="${withPassword ? 'password' : 'email'}" dir="ltr" autocomplete="${withPassword ? 'current-password' : 'off'}"></label>`,
       actions: [
         { label: 'انصراف', class: 'btn-ghost', value: null },
         { label: 'حذف همیشگی', class: 'btn-danger', onClick: (root) => $('#confirm-pass', root).value || undefined },
@@ -969,7 +1097,7 @@ async function renderProfile() {
       await auth.deleteAccount(password);
       studio.result = null;
       toast('حساب حذف شد');
-      navigate('/register');
+      navigate('/studio');
     } catch (err) {
       toast(err.message, 'error');
     }

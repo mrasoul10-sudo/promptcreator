@@ -31,6 +31,19 @@ page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
 
 await context.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
+
+// Google sign-in: enable it with a test client ID and replace Google's script with a stub that returns a signed-in user.
+const GOOGLE_ID = 'test-client.apps.googleusercontent.com';
+await context.route('**/assets/js/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: `export const GOOGLE_CLIENT_ID = '${GOOGLE_ID}';` }));
+const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+const idToken = `${b64url({ alg: 'none' })}.${b64url({ iss: 'https://accounts.google.com', aud: GOOGLE_ID, sub: 'g-123', email: 'maryam@gmail.com', email_verified: true, name: 'مریم گوگلی', exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
+await context.route('https://accounts.google.com/gsi/client', (r) => r.fulfill({
+  contentType: 'text/javascript',
+  body: `window.google = { accounts: { id: {
+    initialize(c) { this.cb = c.callback; },
+    renderButton(el) { const b = document.createElement('button'); b.type = 'button'; b.id = 'gsi-stub'; b.textContent = 'Continue with Google'; b.onclick = () => this.cb({ credential: ${JSON.stringify(idToken)} }); el.appendChild(b); },
+  } } };`,
+}));
 await context.route('https://api.anthropic.com/**', async (route) => {
   const req = route.request();
   if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
@@ -61,18 +74,40 @@ await context.route('https://api.anthropic.com/**', async (route) => {
 
 const step = (name) => console.log(`• ${name}`);
 
-// Register
+// Guest home: writing is open, generating asks to sign in
 await page.goto(BASE);
-await page.waitForSelector('#auth-form');
-step('login screen shown for guests');
-await page.click('a[href="#/register"]');
-await page.fill('input[name=name]', 'رسول تست');
-await page.fill('input[name=email]', 'Test@Example.com');
-await page.fill('input[name=password]', 'secret123');
-await page.click('#auth-form button[type=submit]');
 await page.waitForSelector('#composer');
-step('registered and landed in studio');
+assert.ok(await page.isVisible('.hero'), 'guest hero on home page');
+assert.ok(!(await page.isVisible('#auth-form')), 'no login form up front');
+await page.fill('#source', 'یک لوگو برای کافه با رنگ های گرم میخوام');
+await page.click('#generate-btn');
+await page.waitForSelector('.modal #auth-form');
+step('guest can write on home; generate opens sign-in dialog');
+
+// Protected page as guest opens the dialog too
+await page.keyboard.press('Escape');
+await page.waitForSelector('.modal-backdrop', { state: 'detached' });
+await page.click('a.nav-link[href="#/archive"]');
+await page.waitForSelector('.modal #auth-form');
+assert.match(page.url(), /#\/studio/);
+
+// Register inside the dialog
+await page.click('.auth-tabs .tab[data-mode=register]');
+await page.fill('#auth-form input[name=name]', 'رسول تست');
+await page.fill('#auth-form input[name=email]', 'Test@Example.com');
+await page.fill('#auth-form input[name=password]', 'secret123');
+await page.click('#auth-form button[type=submit]');
+await page.waitForSelector('.recovery-code');
+const recoveryCode = (await page.textContent('.recovery-code')).trim();
+assert.match(recoveryCode, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+await page.click('.modal-foot button:has-text("ذخیره کردم")');
+await page.waitForSelector('.prompt-card, .empty');
+assert.match(page.url(), /#\/archive/, 'returns to the page that asked for sign-in');
+await page.click('a.nav-link[href="#/studio"]');
+await page.waitForSelector('#composer');
+assert.equal(await page.inputValue('#source'), 'یک لوگو برای کافه با رنگ های گرم میخوام', 'draft kept');
 assert.ok(await page.isVisible('.banner'), 'API key banner should show');
+step('registered in dialog, got recovery code, returned to archive, draft kept');
 
 // Settings: bad key then good key
 await page.click('a.nav-link[href="#/settings"]');
@@ -170,17 +205,49 @@ step('avatar uploaded, password changed');
 
 // Logout / login with new password persists data
 await page.click('#logout-btn');
-await page.waitForSelector('#auth-form');
-await page.fill('input[name=email]', 'test@example.com');
-await page.fill('input[name=password]', 'secret123');
+await page.waitForSelector('.hero');
+await page.click('.sidebar [data-login]');
+await page.fill('#auth-form input[name=email]', 'test@example.com');
+await page.fill('#auth-form input[name=password]', 'secret123');
 await page.click('#auth-form button[type=submit]');
 await page.waitForSelector('.form-error:not([hidden])');
-await page.fill('input[name=password]', 'secret456');
+await page.fill('#auth-form input[name=password]', 'secret456');
 await page.click('#auth-form button[type=submit]');
-await page.waitForSelector('#composer');
+await page.waitForSelector('.modal-backdrop', { state: 'detached' });
 await page.goto(`${BASE}#/archive`);
 await page.waitForSelector('.prompt-card');
-step('logout/login with new password; data persisted after reload');
+step('logout/login with new password; still signed in after reload');
+
+// Forgot password with the recovery code
+await page.click('.user-chip');
+await page.click('#logout-btn');
+await page.click('.sidebar [data-login]');
+await page.click('#forgot-link');
+await page.fill('#auth-form input[name=email]', 'test@example.com');
+await page.fill('#auth-form input[name=code]', 'AAAA-BBBB-CCCC');
+await page.fill('#auth-form input[name=password]', 'newpass789');
+await page.click('#auth-form button[type=submit]');
+await page.waitForSelector('.form-error:not([hidden])');
+await page.fill('#auth-form input[name=code]', recoveryCode.toLowerCase());
+await page.click('#auth-form button[type=submit]');
+await page.waitForSelector('.recovery-code');
+const newCode = (await page.textContent('.recovery-code')).trim();
+assert.notEqual(newCode, recoveryCode, 'recovery code rotates after use');
+await page.click('.modal-foot button:has-text("ذخیره کردم")');
+await page.waitForSelector('.user-chip');
+step('forgot password: wrong code rejected, right code resets and signs in');
+
+// Google sign-in creates a separate account
+await page.click('.user-chip');
+await page.click('#logout-btn');
+await page.click('.sidebar [data-login]');
+await page.click('#gsi-stub');
+await page.waitForSelector('.user-chip:has-text("مریم گوگلی")');
+await page.click('.user-chip');
+await page.waitForSelector('#password-form');
+assert.equal(await page.locator('#password-form input[name=old]').count(), 0, 'Google account sets a password without an old one');
+assert.equal(await page.textContent('.stats strong'), '۰', 'Google account starts empty');
+step('Google sign-in works and creates its own account');
 
 // Mobile layout
 await page.setViewportSize({ width: 390, height: 800 });
