@@ -29,6 +29,11 @@ assets/js/app.js        Hash router + all views (auth, studio, history, archive,
 assets/js/engine.js     Engine selection: free service (worker/) or Claude with the user's key; error translation
 assets/js/prompt-spec.js Shared system prompt, per-type guidance, JSON schema, option/result normalization, echo detection
 assets/js/moderation.js  Shared inappropriate-language filter (browser + worker)
+assets/js/voice.js      Voice: dictation into the composer (Web Speech API, fa-IR) and read-aloud (speechSynthesis)
+assets/img/             logo.svg (brand mark, brand color #6C4CF5), favicon.svg, icons/ (PNG app icons from tools/render-icons.mjs)
+manifest.webmanifest    Installable web app (PWA) manifest
+app-android/            Android app: Capacitor shell loading the live site (config, offline page, icon/splash sources, signing key)
+.github/workflows/android.yml  Builds the APK and publishes it as the android-latest release
 assets/fonts/           Self-hosted Vazirmatn variable font (OFL)
 assets/js/prompts.js    Prompt records CRUD, archive, search/filter/sort, facets, backup import/export
 assets/js/auth.js       Local accounts (PBKDF2), Google sign-in linking, recovery codes, session, profile/settings, avatar
@@ -71,7 +76,8 @@ The e2e test covers the guest home, email-first sign-up, the free engine thread 
 - **Cache-busting:** every local CSS/JS reference carries `?v=<version>` (index.html and all relative `import` specifiers). After changing anything under `assets/`, run `npm run bump` before committing, otherwise returning visitors can get a mix of cached old and new modules. Always write new imports as `'./x.js'`; the bump script adds the version.
 
 - **Everything user-facing is Persian** (brand name «پرامپت‌ساز»), set in the self-hosted Vazirmatn font. UI strings are written inline in the views; there is no i18n layer. Avoid English labels and browser-native English widgets such as `<input type="date">`.
-- **Layout is a chat app:** a sidebar (new prompt, search, archive, recent prompts grouped by day, user menu at the bottom; an off-canvas drawer under 860px), a slim top bar (guest: «ورود» / «ثبت‌نام رایگان»), and a composer-first studio: an empty state with a centered heading, the rounded composer (pill selects for type/language/detail, round send button, Enter sends and Shift+Enter adds a line) and suggestion chips; after sending, a thread with the user's text as a bubble and the result below it (Persian/English tabs, copy, archive, refine). A thread is bookmarkable as `#/studio?p=<id>`.
+- **Brand:** one color, `--brand: #6C4CF5`, used by the logo (`logoMark()` in `ui.js`, same drawing as `assets/img/logo.svg`), favicon, app icons and accents. After editing the logo, run `node tools/render-icons.mjs` to regenerate every PNG (web and Android).
+- **Layout is a chat app:** a sidebar (new prompt, search, archive, recent prompts grouped by day, help and rules, user menu at the bottom; on desktop it collapses to a 60px icon rail with tooltips, under 860px it is an off-canvas drawer), a slim top bar (guest: «ورود» / «ثبت‌نام رایگان»), and a composer-first studio: an empty state with a centered heading, the rounded composer (pill selects for type/language/detail, round send button, Enter sends and Shift+Enter adds a line) and suggestion chips; after sending, a thread with the user's text as a bubble and the result below it (Persian/English tabs, copy, archive, refine). A thread is bookmarkable as `#/studio?p=<id>`.
 - **Sign-in** is one dialog (`openAuthModal`) in ChatGPT style: Google button, «یا», then email first → password step (existing account) or name + password (new account), plus a forgot-password step using the recovery code.
 - Routes are `#/studio` (public home, `?p=<id>` opens a saved thread), `#/help` and `#/rules` (public), `#/history` (the search page), `#/archive`, `#/profile`, `#/settings` (need sign-in: a guest is kept on the studio, the auth dialog opens, and on success they are sent to the page they asked for). There are no login pages; `openAuthModal()` is the only sign-in UI. Filters are mirrored into the hash query string (bookmarkable) via `syncQuery()` without re-routing.
 - Every generation is stored immediately as a prompt record with `archived: false`. Archiving sets `archived: true` plus metadata. Deleting from history deletes the record everywhere.

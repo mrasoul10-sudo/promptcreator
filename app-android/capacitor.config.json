@@ -1,0 +1,15 @@
+{
+  "appId": "io.github.mrasoul10sudo.promptsaz",
+  "appName": "پرامپت‌ساز",
+  "webDir": "www",
+  "backgroundColor": "#ffffff",
+  "server": {
+    "url": "https://mrasoul10-sudo.github.io/promptcreator/",
+    "androidScheme": "https",
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "appendUserAgent": "PromptSazApp",
+    "allowMixedContent": false
+  }
+}

@@ -32,6 +32,19 @@ page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resourc
 
 await context.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());
 
+// Fake Web Speech recognition: "hears" a fixed Persian sentence when started.
+await context.addInitScript(() => {
+  window.SpeechRecognition = class {
+    start() {
+      setTimeout(() => {
+        this.onresult?.({ resultIndex: 0, results: [Object.assign([{ transcript: 'یک لوگو برای نانوایی' }], { isFinal: true })] });
+        setTimeout(() => this.onend?.(), 50);
+      }, 50);
+    }
+    stop() { this.onend?.(); }
+  };
+});
+
 // Google sign-in: enable it with a test client ID and replace Google's script with a stub that returns a signed-in user.
 const GOOGLE_ID = 'test-client.apps.googleusercontent.com';
 const FREE_API = 'https://promptcreator-api.test.workers.dev';
@@ -123,6 +136,27 @@ await page.waitForSelector('.rules-list li');
 await page.click('.tb-title');
 await page.waitForSelector('#composer');
 step('help and rules pages open for guests');
+
+// Desktop sidebar collapses to an icon rail (like chat apps) and expands again
+await page.click('.sb-toggle');
+await page.waitForTimeout(300);
+assert.equal(await page.evaluate(() => Math.round(document.querySelector('.sidebar').getBoundingClientRect().width)), 60, 'rail is 60px wide');
+assert.ok(await page.isVisible('#sb-new .icon'), 'icons stay visible in the rail');
+assert.ok(!(await page.isVisible('#sb-new span')), 'labels hidden in the rail');
+await page.click('.sb-toggle');
+await page.waitForTimeout(300);
+assert.ok(await page.isVisible('#sb-new span'), 'labels back when expanded');
+assert.ok(await page.evaluate(() => Boolean(document.querySelector('link[rel=manifest]'))), 'web app manifest linked');
+step('sidebar icon rail toggles');
+
+// Voice dictation fills the composer
+await page.fill('#source', '');
+await page.click('#mic-btn');
+await page.waitForSelector('#mic-btn:not(.listening)');
+await page.waitForTimeout(200);
+assert.equal(await page.inputValue('#source'), 'یک لوگو برای نانوایی', 'dictated text lands in the composer');
+await page.fill('#source', '');
+step('voice dictation fills the composer');
 
 // Theme toggle in the top bar
 const themeBefore = await page.evaluate(() => document.documentElement.dataset.theme || '');

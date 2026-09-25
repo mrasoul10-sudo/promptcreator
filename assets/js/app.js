@@ -1,15 +1,16 @@
 // Prompt Creator (پرامپت‌ساز) — single-page app shell, hash router and views. Layout follows a chat-app pattern:
 // a sidebar with recent prompts, a top bar, and a composer-first home page.
 
-import * as auth from './auth.js?v=202609251128';
-import * as prompts from './prompts.js?v=202609251128';
-import * as engine from './engine.js?v=202609251128';
-import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251128';
-import * as google from './google.js?v=202609251128';
+import * as auth from './auth.js?v=202609251141';
+import * as prompts from './prompts.js?v=202609251141';
+import * as engine from './engine.js?v=202609251141';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251141';
+import * as voice from './voice.js?v=202609251141';
+import * as google from './google.js?v=202609251141';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
-  highlight, truncate, avatarHtml, paintAvatars, download,
-} from './ui.js?v=202609251128';
+  highlight, truncate, avatarHtml, paintAvatars, download, logoMark,
+} from './ui.js?v=202609251141';
 
 const APP_NAME = 'پرامپت‌ساز';
 const view = $('#view');
@@ -98,6 +99,8 @@ async function route() {
   document.title = `${ROUTES[target].title} · ${APP_NAME}`;
   document.body.dataset.page = target.slice(1);
   closeDrawer();
+  voice.stopDictation();
+  voice.stopSpeaking();
   renderTopbar();
   renderSidebar();
   view.classList.remove('view-enter');
@@ -170,14 +173,14 @@ async function renderSidebar() {
   sidebar.innerHTML = `
     <div class="sb-head">
       <a class="brand" href="#/studio" aria-label="${APP_NAME}">
-        <span class="brand-mark">${icon('wand')}</span><span class="brand-name">${APP_NAME}</span>
+        ${logoMark('brand-mark')}<span class="brand-name">${APP_NAME}</span>
       </a>
-      <button class="icon-btn" data-toggle-sidebar aria-label="بستن منو" title="بستن منو">${icon('sidebar')}</button>
+      <button class="icon-btn sb-toggle" data-toggle-sidebar aria-label="باز و بسته کردن منو" data-tip="باز کردن منو">${logoMark('toggle-logo')}${icon('sidebar')}</button>
     </div>
     <nav class="sb-nav" aria-label="منوی اصلی">
-      <button class="sb-item" id="sb-new">${icon('edit')}<span>پرامپت جدید</span></button>
-      <a class="sb-item ${active === '/history' ? 'active' : ''}" href="#/history">${icon('search')}<span>جستجوی پرامپت‌ها</span></a>
-      <a class="sb-item ${active === '/archive' ? 'active' : ''}" href="#/archive">${icon('archive')}<span>آرشیو</span></a>
+      <button class="sb-item" id="sb-new" data-tip="پرامپت جدید">${icon('edit')}<span>پرامپت جدید</span></button>
+      <a class="sb-item ${active === '/history' ? 'active' : ''}" href="#/history" data-tip="جستجوی پرامپت‌ها">${icon('search')}<span>جستجوی پرامپت‌ها</span></a>
+      <a class="sb-item ${active === '/archive' ? 'active' : ''}" href="#/archive" data-tip="آرشیو">${icon('archive')}<span>آرشیو</span></a>
     </nav>
     <div class="sb-recent" id="sb-recent">
       ${user ? '' : `
@@ -188,16 +191,16 @@ async function renderSidebar() {
         </div>`}
     </div>
     <nav class="sb-nav sb-secondary" aria-label="راهنما">
-      <a class="sb-item ${active === '/help' ? 'active' : ''}" href="#/help">${icon('help')}<span>راهنما</span></a>
-      <a class="sb-item ${active === '/rules' ? 'active' : ''}" href="#/rules">${icon('shield')}<span>قوانین</span></a>
+      <a class="sb-item ${active === '/help' ? 'active' : ''}" href="#/help" data-tip="راهنما">${icon('help')}<span>راهنما</span></a>
+      <a class="sb-item ${active === '/rules' ? 'active' : ''}" href="#/rules" data-tip="قوانین">${icon('shield')}<span>قوانین</span></a>
     </nav>
     <div class="sb-foot">
       ${user ? `
-        <button class="sb-user" id="user-menu-btn" aria-haspopup="menu" aria-expanded="false">
+        <button class="sb-user" id="user-menu-btn" aria-haspopup="menu" aria-expanded="false" data-tip="${esc(user.name)}">
           ${avatarHtml(user, 'sm')}
           <span class="user-meta"><strong>${esc(user.name)}</strong><small>${esc(user.email)}</small></span>
         </button>` : `
-        <button class="sb-item" data-theme-toggle>${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}<span>${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}</span></button>`}
+        <button class="sb-item" data-theme-toggle data-tip="${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}<span>${currentTheme() === 'dark' ? 'تم روشن' : 'تم تیره'}</span></button>`}
     </div>`;
   paintAvatars(sidebar);
   $('#sb-new').addEventListener('click', newPrompt);
@@ -497,7 +500,10 @@ function composerHtml(draft) {
           ${selectPill('lang', engine.LANGS, draft.lang, 'globe', 'زبان خروجی')}
           ${selectPill('detail', engine.DETAILS, draft.detail, 'sliders', 'میزان جزئیات')}
         </div>
-        <button type="submit" class="send-btn" id="generate-btn" aria-label="ساخت پرامپت" title="ساخت پرامپت" disabled>${icon('arrowUp')}</button>
+        <div class="composer-actions">
+          ${voice.canDictate() ? `<button type="button" class="icon-btn mic-btn" id="mic-btn" aria-label="گفتن به‌جای نوشتن" title="گفتن به‌جای نوشتن" aria-pressed="false">${icon('mic')}</button>` : ''}
+          <button type="submit" class="send-btn" id="generate-btn" aria-label="ساخت پرامپت" title="ساخت پرامپت" disabled>${icon('arrowUp')}</button>
+        </div>
       </div>
     </form>
     <p class="composer-foot"><span>پرامپت‌ساز ممکن است اشتباه کند؛ نتیجه را بررسی کنید.</span><span id="quota-note"></span></p>`;
@@ -574,9 +580,38 @@ async function renderStudio(params) {
   }));
   form.addEventListener('submit', (e) => {
     e.preventDefault();
+    voice.stopDictation();
     if (studio.busy) studio.controller?.abort();
     else runGeneration();
   });
+  const mic = $('#mic-btn');
+  if (mic) {
+    let base = '';
+    const setListening = (on) => {
+      mic.classList.toggle('listening', on);
+      mic.setAttribute('aria-pressed', String(on));
+      mic.title = on ? 'پایان گفتن' : 'گفتن به‌جای نوشتن';
+      source.placeholder = on ? 'در حال شنیدن… صحبت کنید' : 'ایده، درخواست یا پرامپت خامتان را بنویسید…';
+    };
+    mic.addEventListener('click', () => {
+      if (mic.classList.contains('listening')) { voice.stopDictation(); return; }
+      base = source.value.trim();
+      setListening(true);
+      voice.dictate({
+        lang: 'fa-IR',
+        onText: (finalText, interim) => {
+          source.value = [base, finalText, interim].filter(Boolean).join(' ');
+          autoGrow();
+          sync();
+        },
+        onEnd: (error) => {
+          setListening(false);
+          if (error) toast(error, 'error', 6000);
+          else source.focus();
+        },
+      });
+    });
+  }
 
   requestAnimationFrame(() => { autoGrow(); sync(); });
   if (engine.engineFor(s) === 'free') refreshQuotaNote();
@@ -624,7 +659,7 @@ function showPending() {
   thread.innerHTML = `
     ${userBubble(studio.pending.source)}
     <div class="msg msg-bot">
-      <span class="bot-avatar">${icon('wand')}</span>
+      <span class="bot-avatar">${logoMark()}</span>
       <div class="bot-body">
         <div class="thinking"><span class="dots"><i></i><i></i><i></i></span><span>در حال ساخت پرامپت</span><span class="muted" id="elapsed"></span></div>
         <div class="skeleton w-60"></div><div class="skeleton"></div><div class="skeleton w-80"></div>
@@ -699,7 +734,7 @@ async function runGeneration() {
     const thread = $('#thread');
     if (thread && err.code !== 'aborted') {
       thread.innerHTML = `${userBubble(text)}
-        <div class="msg msg-bot"><span class="bot-avatar">${icon('wand')}</span>
+        <div class="msg msg-bot"><span class="bot-avatar">${logoMark()}</span>
           <div class="bot-body"><div class="error-card">${icon('info')}<div><strong>ساخت پرامپت انجام نشد</strong><p></p></div></div></div>
         </div>`;
       $('.error-card p', thread).textContent = err.message;
@@ -729,7 +764,7 @@ function showThread(record, animate = false) {
   thread.innerHTML = `
     ${userBubble(record.source)}
     <div class="msg msg-bot ${animate ? 'pop-in' : ''}">
-      <span class="bot-avatar">${icon('wand')}</span>
+      <span class="bot-avatar">${logoMark()}</span>
       <div class="bot-body">
         <h2 class="result-title" dir="auto"></h2>
         <p class="result-meta">${esc(engine.TARGETS[record.type]?.label || '')} · ${esc(engine.DETAILS[record.detail] || '')}</p>
@@ -750,6 +785,7 @@ function showThread(record, animate = false) {
           <button class="icon-btn copy-btn" id="copy-result" aria-label="کپی" title="کپی">${icon('copy')}</button>
           <button class="icon-btn ${record.archived ? 'on' : ''}" id="archive-btn" aria-label="${record.archived ? 'در آرشیو' : 'ذخیره در آرشیو'}" title="${record.archived ? 'در آرشیو (ویرایش)' : 'ذخیره در آرشیو'}">${icon('archive')}</button>
           <button class="icon-btn" id="refine-btn" aria-label="بهبود دوباره" title="بهبود دوباره">${icon('refresh')}</button>
+          ${voice.canSpeak() ? `<button class="icon-btn" id="speak-btn" aria-label="خواندن با صدا" title="خواندن با صدا">${icon('volume')}</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -770,6 +806,21 @@ function showThread(record, animate = false) {
       studio.result = saved;
       showThread(saved);
       renderSidebar();
+    }
+  });
+  $('#speak-btn')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    if (btn.classList.contains('on')) { voice.stopSpeaking(); return; }
+    const lang = activeLang();
+    btn.classList.add('on');
+    btn.innerHTML = icon('stop');
+    try {
+      await voice.speak(lang === 'fa' ? record.promptFa : record.promptEn, lang === 'fa' ? 'fa-IR' : 'en-US');
+    } catch (err) {
+      toast(err.message, 'error', 6000);
+    } finally {
+      btn.classList.remove('on');
+      btn.innerHTML = icon('volume');
     }
   });
   $('#refine-btn').addEventListener('click', () => {
@@ -1485,7 +1536,21 @@ function renderRules() {
 
 // ---------- Boot ----------
 
+/** Android app (Capacitor): hardware back closes dialogs/drawer, goes back in history, then exits. */
+function setupAndroidBack() {
+  const appPlugin = window.Capacitor?.Plugins?.App;
+  if (!appPlugin?.addListener) return;
+  appPlugin.addListener('backButton', () => {
+    const openModal = $('.modal-backdrop [data-close]');
+    if (openModal) { openModal.click(); return; }
+    if (document.body.classList.contains('drawer-open')) { closeDrawer(); return; }
+    if (location.hash && location.hash !== '#/studio') history.back();
+    else appPlugin.exitApp();
+  });
+}
+
 async function boot() {
+  setupAndroidBack();
   try {
     await auth.restore();
   } catch (err) {

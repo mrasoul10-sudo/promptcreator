@@ -1,0 +1,79 @@
+# Builds the Android app (Capacitor shell in app-android/ that loads the live site) and publishes the APK
+# as the "android-latest" GitHub release: https://github.com/mrasoul10-sudo/promptcreator/releases/latest
+# Runs on changes to app-android/ or this file, or manually from the Actions tab.
+
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/free-credit-usage-2bg9tp, main]
+    paths:
+      - 'app-android/**'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app-android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Capacitor
+        run: npm install --no-audit --no-fund
+
+      - name: Create Android project
+        run: npx cap add android
+
+      - name: Generate launcher icons and splash screens
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#6C4CF5' --iconBackgroundColorDark '#6C4CF5' --splashBackgroundColor '#ffffff' --splashBackgroundColorDark '#212121'
+
+      - name: Sync web assets and plugins
+        run: npx cap sync android
+
+      - name: Set version
+        run: |
+          sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/; s/versionName \"[^\"]*\"/versionName \"1.0.${{ github.run_number }}\"/" android/app/build.gradle
+          grep -E 'versionCode|versionName' android/app/build.gradle
+
+      - name: Build APK
+        run: |
+          # A fixed signing key (app-android/debug.keystore) so each new APK installs over the previous one.
+          mkdir -p ~/.android && cp debug.keystore ~/.android/debug.keystore
+          cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk ../promptsaz.apk
+          ls -la ../promptsaz.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: promptsaz-apk
+          path: app-android/promptsaz.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: پرامپت‌ساز برای اندروید (نسخه ${{ github.run_number }})
+          body: |
+            فایل **promptsaz.apk** را روی گوشی اندروید دانلود و نصب کنید (اجازه «نصب از منابع ناشناس» را بدهید).
+            نسخه‌های بعدی روی همین نسخه نصب می‌شوند و اطلاعات شما در برنامه حفظ می‌شود.
+          files: app-android/promptsaz.apk
+          make_latest: true

@@ -1,6 +1,6 @@
 // "Sign in with Google" via Google Identity Services (client-side only; no backend).
 
-import { GOOGLE_CLIENT_ID } from './config.js?v=202609251128';
+import { GOOGLE_CLIENT_ID } from './config.js?v=202609251141';
 
 const GSI_SRC = 'https://accounts.google.com/gsi/client';
 
@@ -8,8 +8,13 @@ let loader = null;
 let initialized = false;
 let onCredential = null;
 
+/** True inside the Android app shell (app-android/), whose WebView Google does not allow for sign-in. */
+export function inAndroidApp() {
+  return /PromptSazApp/.test(navigator.userAgent);
+}
+
 export function enabled() {
-  return Boolean(GOOGLE_CLIENT_ID);
+  return Boolean(GOOGLE_CLIENT_ID) && !inAndroidApp();
 }
 
 function load() {
