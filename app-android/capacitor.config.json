@@ -4,7 +4,7 @@
   "webDir": "www",
   "backgroundColor": "#ffffff",
   "server": {
-    "url": "https://mrasoul10-sudo.github.io/promptcreator/",
+    "url": "https://promptsaz.pages.dev/",
     "androidScheme": "https",
     "errorPath": "offline.html"
   },
