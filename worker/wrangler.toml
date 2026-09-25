@@ -5,8 +5,8 @@ compatibility_date = "2026-09-01"
 workers_dev = true
 
 [vars]
-# Comma-separated origins allowed to call the API (the GitHub Pages site and local development).
-ALLOWED_ORIGINS = "https://mrasoul10-sudo.github.io,http://localhost:8765"
+# Comma-separated origins allowed to call the API (the Cloudflare Pages and GitHub Pages sites, local development).
+ALLOWED_ORIGINS = "https://promptsaz.pages.dev,https://mrasoul10-sudo.github.io,http://localhost:8765"
 # Gemini models: the alias always points at the current free Flash model; the fallback is used when it is busy.
 GEMINI_MODEL = "gemini-flash-latest"
 GEMINI_FALLBACK_MODEL = "gemini-flash-lite-latest"

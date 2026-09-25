@@ -1,17 +1,17 @@
 // Prompt Creator (پرامپت‌ساز) — single-page app shell, hash router and views. Layout follows a chat-app pattern:
 // a sidebar with recent prompts, a top bar, and a composer-first home page.
 
-import * as auth from './auth.js?v=202609251206';
-import * as prompts from './prompts.js?v=202609251206';
-import * as engine from './engine.js?v=202609251206';
-import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251206';
-import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251206';
-import * as voice from './voice.js?v=202609251206';
-import * as google from './google.js?v=202609251206';
+import * as auth from './auth.js?v=202609251222';
+import * as prompts from './prompts.js?v=202609251222';
+import * as engine from './engine.js?v=202609251222';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251222';
+import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251222';
+import * as voice from './voice.js?v=202609251222';
+import * as google from './google.js?v=202609251222';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download, logoMark, enableTooltips,
-} from './ui.js?v=202609251206';
+} from './ui.js?v=202609251222';
 
 const APP_NAME = 'پرامپت‌ساز';
 const view = $('#view');

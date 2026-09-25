@@ -113,7 +113,7 @@ jobs:
             echo "waiting for $URL ($i)"; sleep 10
           done
           code=$(curl -sS -o /tmp/out.json -w '%{http_code}' -X POST "$URL/generate" \
-            -H 'content-type: application/json' -H 'origin: https://mrasoul10-sudo.github.io' \
+            -H 'content-type: application/json' -H 'origin: https://promptsaz.pages.dev' \
             -d '{"source":"یک لوگوی مینیمال برای کافه با رنگ‌های گرم","type":"image","lang":"both","detail":"concise"}')
           echo "HTTP $code"
           head -c 3000 /tmp/out.json; echo
@@ -121,7 +121,7 @@ jobs:
           node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/out.json","utf8")).result; if(!r.promptEn||!r.promptFa){console.error("empty prompt");process.exit(1)}'
           # Quality sample: an informal Persian change request must come back restructured, not echoed.
           curl -sS -o /tmp/q.json -X POST "$URL/generate" \
-            -H 'content-type: application/json' -H 'origin: https://mrasoul10-sudo.github.io' \
+            -H 'content-type: application/json' -H 'origin: https://promptsaz.pages.dev' \
             --data-binary @- <<'JSON'
           {"source":"مانده برنامه کل برنامه اینها به عدد نوشتن کار خوبی نیست چرا ؟ نباید مثلا تعداد باربیکیو اروپایی را با نظم دهنده جمع بست . هرکدام 2 محصول مجزا هستند و هیچ ارتباطی به یکدیگر ندارند . بخش فیلترها و تایتل بلوک دو خطی شده . فیلترها در یک خط سمت راست و دکمه های پرینت سمت چپ باشند","type":"auto","lang":"both","detail":"balanced"}
           JSON

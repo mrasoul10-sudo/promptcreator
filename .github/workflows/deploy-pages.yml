@@ -1,0 +1,95 @@
+# Publishes the static site to Cloudflare Pages at https://promptsaz.pages.dev (GitHub Pages keeps working too).
+#
+# Uses the same secrets as deploy-worker.yml. The CLOUDFLARE_API_TOKEN must also have the permission
+# "Account -> Cloudflare Pages -> Edit" (Cloudflare dashboard -> My Profile -> API Tokens -> Edit token).
+# Runs on site changes, after the worker workflow (which may commit a new config.js), or manually.
+
+name: Deploy site (Cloudflare Pages)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/free-credit-usage-2bg9tp, main]
+    paths:
+      - 'index.html'
+      - 'assets/**'
+      - 'manifest.webmanifest'
+      - 'privacy.html'
+      - 'terms.html'
+      - '.github/workflows/deploy-pages.yml'
+  workflow_run:
+    workflows: ['Deploy free API (Cloudflare Worker)']
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-pages
+  cancel-in-progress: true
+
+env:
+  PROJECT: promptsaz
+  # A fixed production branch name, so every run is a production deployment whatever git branch it came from.
+  PROD_BRANCH: production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # After the worker workflow, take the branch head so its config.js commit is included.
+          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+
+      - name: Check secrets
+        id: secrets
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ]; then
+            echo "::warning::Secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required. See docs/DEPLOYMENT.md."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          node-version: 22
+
+      - name: Collect site files
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          mkdir dist
+          cp -r index.html manifest.webmanifest privacy.html terms.html assets dist/
+          du -sh dist
+
+      - name: Deploy to Cloudflare Pages
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          W="npx --yes wrangler@4.140.0"
+          if ! $W pages project list > /tmp/projects.txt 2>&1; then
+            cat /tmp/projects.txt
+            echo "::error::The Cloudflare token cannot access Pages. Add the permission 'Account -> Cloudflare Pages -> Edit' to CLOUDFLARE_API_TOKEN (see docs/DEPLOYMENT.md), then re-run this workflow."
+            exit 1
+          fi
+          if ! grep -qw "$PROJECT" /tmp/projects.txt; then
+            $W pages project create "$PROJECT" --production-branch "$PROD_BRANCH"
+          fi
+          $W pages deploy dist --project-name "$PROJECT" --branch "$PROD_BRANCH" --commit-dirty=true
+          $W pages project list | grep -w "$PROJECT" || true
+
+      - name: Check the live site
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS "https://$PROJECT.pages.dev/" | grep -q 'assets/js/app.js'; then echo "https://$PROJECT.pages.dev is live"; exit 0; fi
+            echo "waiting ($i)"; sleep 10
+          done
+          echo "::warning::https://$PROJECT.pages.dev did not answer yet. If the name was taken, Cloudflare picked another subdomain: see the project list above."

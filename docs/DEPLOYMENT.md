@@ -1,8 +1,26 @@
-# راه‌اندازی روی GitHub Pages
+# راه‌اندازی
 
-برنامه یک سایت استاتیک است و مستقیماً از همین ریپازیتوری روی GitHub Pages اجرا می‌شود. نه سرور لازم دارد، نه دیتابیس، نه مرحله build.
+برنامه یک سایت استاتیک است (نه سرور لازم دارد، نه دیتابیس، نه مرحله build) و از همین ریپازیتوری در دو نشانی منتشر می‌شود:
 
-## فعال‌سازی (یک بار)
+- **نشانی اصلی:** <https://promptsaz.pages.dev> روی Cloudflare Pages (workflow `deploy-pages.yml`)
+- **نشانی قبلی:** <https://mrasoul10-sudo.github.io/promptcreator/> روی GitHub Pages
+
+> اطلاعات کاربران (حساب، تاریخچه، آرشیو) در مرورگر و جدا برای هر نشانی ذخیره می‌شود. برای انتقال پرامپت‌ها، در نشانی قبلی از **تنظیمات ← دریافت فایل پشتیبان** فایل بگیرید، در نشانی جدید حساب بسازید (یا با گوگل وارد شوید) و **بازگردانی از فایل** را بزنید.
+
+## Cloudflare Pages (نشانی اصلی)
+
+از همان دو Secret سرویس رایگان (`CLOUDFLARE_API_TOKEN` و `CLOUDFLARE_ACCOUNT_ID`، بخش پایین) استفاده می‌کند. فقط یک دسترسی به توکن اضافه کنید:
+
+1. در داشبورد Cloudflare به **My Profile → API Tokens** بروید و کنار توکن فعلی **Edit** را بزنید.
+2. در **Permissions** روی **+ Add more** بزنید و این ردیف را اضافه کنید: `Account` · `Cloudflare Pages` · `Edit`.
+3. **Continue to summary → Update token** (مقدار توکن عوض نمی‌شود و Secret گیت‌هاب نیاز به تغییر ندارد).
+4. در تب **Actions**، workflow **Deploy site (Cloudflare Pages)** را اجرا کنید (**Run workflow**).
+
+پروژه `promptsaz` بار اول خودکار ساخته می‌شود و از آن به بعد هر تغییر در فایل‌های سایت خودکار منتشر می‌شود. نشانی `promptsaz.pages.dev` را در بخش «ورود با گوگل» پایین هم اضافه کنید.
+
+## GitHub Pages (نشانی قبلی)
+
+### فعال‌سازی (یک بار)
 
 1. در گیت‌هاب به صفحه ریپازیتوری `mrasoul10-sudo/promptcreator` بروید.
 2. **Settings** ← از منوی کناری **Pages**.
@@ -26,7 +44,7 @@
 2. **APIs & Services → OAuth consent screen**: نوع **External** را انتخاب کنید، نام برنامه (Prompt Creator) و ایمیل را وارد کنید و در آخر **Publish app** را بزنید.
 3. **APIs & Services → Credentials → Create credentials → OAuth client ID**:
    - Application type: **Web application**
-   - **Authorized JavaScript origins**: `https://mrasoul10-sudo.github.io` (و برای تست محلی `http://localhost:8765`)
+   - **Authorized JavaScript origins**: `https://promptsaz.pages.dev` و `https://mrasoul10-sudo.github.io` (و برای تست محلی `http://localhost:8765`)
    - Redirect URI لازم نیست.
 4. Client ID ساخته‌شده (به شکل `xxxx.apps.googleusercontent.com`) را در `assets/js/config.js` بگذارید:
    ```js

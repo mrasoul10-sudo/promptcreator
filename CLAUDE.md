@@ -6,7 +6,7 @@ Guidance for AI coding agents (Claude Code and others) working in this repositor
 
 **Prompt Creator** is a bilingual (Persian/English) web app that rewrites a user's rough idea into a professional AI prompt, in English, Persian, or both. By default it uses a **free service** (Gemini behind a small Cloudflare Worker in `worker/`, no key for visitors, daily limits); users can instead choose **Claude with their own API key**. Every generation is saved to **history**, and the user can keep prompts in an **archive** with folders, tags, notes, favorites and advanced search. The home page (studio) is open to guests; signing in is asked for in a dialog only when they generate or open another page. Accounts are local (email/password with a one-time recovery code, or **Sign in with Google**), with avatar and password change.
 
-The site is **static** on **GitHub Pages**. All user data lives in the visitor's browser (IndexedDB). The only server code is the stateless prompt proxy in `worker/` (Cloudflare Worker + a Durable Object for daily quotas); it holds the Gemini key and stores no user content. In Claude mode the browser calls the Claude API directly with the user's own key.
+The site is **static** on **Cloudflare Pages** (`promptsaz.pages.dev`) and **GitHub Pages**. All user data lives in the visitor's browser (IndexedDB). The only server code is the stateless prompt proxy in `worker/` (Cloudflare Worker + a Durable Object for daily quotas); it holds the Gemini key and stores no user content. In Claude mode the browser calls the Claude API directly with the user's own key.
 
 ## Hard constraints
 
@@ -91,4 +91,4 @@ The e2e test covers the guest home, email-first sign-up, the free engine thread 
 
 ## Deployment
 
-GitHub Pages, "Deploy from a branch", root folder. See `docs/DEPLOYMENT.md`. `.nojekyll` must stay at the root.
+Primary: Cloudflare Pages at `https://promptsaz.pages.dev`, published by `.github/workflows/deploy-pages.yml` (copies `index.html`, `assets/`, `manifest.webmanifest`, `privacy.html`, `terms.html`; add any new root-level site file there). Also GitHub Pages, "Deploy from a branch", root folder (`.nojekyll` must stay at the root). Both origins must be in the worker's `ALLOWED_ORIGINS` and in the Google OAuth client. The Android app loads `server.url` in `app-android/capacitor.config.json`. See `docs/DEPLOYMENT.md`.
