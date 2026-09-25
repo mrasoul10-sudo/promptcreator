@@ -1,17 +1,17 @@
 // Prompt Creator (پرامپت‌ساز) — single-page app shell, hash router and views. Layout follows a chat-app pattern:
 // a sidebar with recent prompts, a top bar, and a composer-first home page.
 
-import * as auth from './auth.js?v=202609251236';
-import * as prompts from './prompts.js?v=202609251236';
-import * as engine from './engine.js?v=202609251236';
-import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251236';
-import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251236';
-import * as voice from './voice.js?v=202609251236';
-import * as google from './google.js?v=202609251236';
+import * as auth from './auth.js?v=202609251243';
+import * as prompts from './prompts.js?v=202609251243';
+import * as engine from './engine.js?v=202609251243';
+import { findInappropriate, INAPPROPRIATE_MESSAGE } from './moderation.js?v=202609251243';
+import { ANDROID_APK_URL, ANDROID_RELEASES_URL } from './config.js?v=202609251243';
+import * as voice from './voice.js?v=202609251243';
+import * as google from './google.js?v=202609251243';
 import {
   $, $$, esc, icon, toast, modal, confirmDialog, copyText, formatDate, relativeTime, num,
   highlight, truncate, avatarHtml, paintAvatars, download, logoMark, enableTooltips,
-} from './ui.js?v=202609251236';
+} from './ui.js?v=202609251243';
 
 const APP_NAME = 'پرامپت‌ساز';
 const view = $('#view');
@@ -158,6 +158,7 @@ function toggleSidebar() {
     document.body.classList.toggle('drawer-open');
     return;
   }
+  closeFlyout();
   const closed = document.body.classList.toggle('sidebar-closed');
   try { localStorage.setItem(SIDEBAR_KEY, closed ? 'closed' : 'open'); } catch { /* ignore */ }
 }
@@ -192,6 +193,7 @@ async function renderSidebar() {
   const user = auth.currentUser();
   const sidebar = $('#sidebar');
   const active = parseHash().path;
+  closeFlyout();
   sidebar.innerHTML = `
     <div class="sb-head">
       <a class="brand" href="#/studio" aria-label="${APP_NAME}">
@@ -203,6 +205,9 @@ async function renderSidebar() {
       <button class="sb-item" id="sb-new" data-tip="پرامپت جدید">${icon('edit')}<span>پرامپت جدید</span></button>
       <a class="sb-item ${active === '/history' ? 'active' : ''}" href="#/history" data-tip="جستجوی پرامپت‌ها">${icon('search')}<span>جستجوی پرامپت‌ها</span></a>
       <a class="sb-item ${active === '/archive' ? 'active' : ''}" href="#/archive" data-tip="آرشیو">${icon('archive')}<span>آرشیو</span></a>
+      ${user ? `
+        <button class="sb-item sb-rail-only" data-flyout="pinned" aria-haspopup="menu" aria-expanded="false" data-tip="پین‌شده‌ها">${icon('pin')}<span>پین‌شده‌ها</span></button>
+        <button class="sb-item sb-rail-only" data-flyout="recent" aria-haspopup="menu" aria-expanded="false" data-tip="اخیر">${icon('clock')}<span>اخیر</span></button>` : ''}
     </nav>
     <div class="sb-recent" id="sb-recent">
       ${user ? '' : `
@@ -231,7 +236,109 @@ async function renderSidebar() {
   $$('[data-login]', sidebar).forEach((b) => b.addEventListener('click', () => openAuthModal({ mode: b.dataset.login })));
   $$('[data-theme-toggle]', sidebar).forEach((b) => b.addEventListener('click', () => { toggleTheme(); renderSidebar(); renderTopbar(); }));
   $('#user-menu-btn')?.addEventListener('click', (e) => openUserMenu(e.currentTarget));
+  $$('[data-flyout]', sidebar).forEach((b) => b.addEventListener('click', () => openFlyout(b)));
+  $('#sb-recent').addEventListener('click', (e) => {
+    const pinBtn = e.target.closest('[data-pin]');
+    if (!pinBtn) return;
+    e.preventDefault();
+    togglePin(pinBtn.dataset.pin);
+  });
   if (user) fillRecent(user);
+}
+
+function sbLink(r, currentId) {
+  return `
+    <div class="sb-row">
+      <a class="sb-link ${r.id === currentId ? 'active' : ''}" href="#/studio?p=${encodeURIComponent(r.id)}" title="${esc(r.title || r.source)}">
+        <span dir="auto">${esc(truncate(r.title || r.source, 42))}</span>
+        ${r.archived ? icon('archive', 'sb-flag') : ''}
+      </a>
+      <button class="sb-pin ${r.pinned ? 'on' : ''}" data-pin="${esc(r.id)}" aria-label="${r.pinned ? 'برداشتن پین' : 'پین کردن'}" title="${r.pinned ? 'برداشتن پین' : 'پین کردن'}">${icon('pin')}</button>
+    </div>`;
+}
+
+/** Pins or unpins a prompt, then refreshes the sidebar and the open thread. */
+async function togglePin(id) {
+  const user = auth.currentUser();
+  if (!user) return;
+  try {
+    const row = await prompts.get(user.id, id);
+    const saved = await prompts.setPinned(user.id, id, !row.pinned);
+    toast(saved.pinned ? 'پرامپت پین شد' : 'پین برداشته شد', 'success');
+    if (studio.result?.id === id) {
+      studio.result = { ...studio.result, pinned: saved.pinned, pinnedAt: saved.pinnedAt };
+      if ($('#thread .msg-bot')) showThread(studio.result);
+    }
+    fillRecent(user);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ---------- Rail flyouts (collapsed sidebar): pinned prompts and the 10 most recent, beside the button ----------
+
+let flyout = null;
+
+function closeFlyout() {
+  if (!flyout) return;
+  flyout.cleanup();
+  flyout = null;
+}
+
+async function openFlyout(btn) {
+  const kind = btn.dataset.flyout;
+  const same = flyout?.kind === kind;
+  closeFlyout();
+  if (same) return;
+  const user = auth.currentUser();
+  if (!user) return;
+  const rows = await prompts.listForUser(user.id);
+  const items = kind === 'pinned' ? prompts.pinnedOf(rows) : rows.slice(0, 10);
+  const menu = document.createElement('div');
+  menu.className = 'sb-flyout';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = `
+    <div class="sb-flyout-head">${kind === 'pinned' ? 'پین‌شده‌ها' : 'اخیر'}</div>
+    ${items.length ? items.map((r) => `
+      <a role="menuitem" href="#/studio?p=${encodeURIComponent(r.id)}" title="${esc(r.title || r.source)}">
+        <span dir="auto">${esc(truncate(r.title || r.source, 48))}</span>
+        ${r.pinned && kind !== 'pinned' ? icon('pin', 'sb-flag') : ''}
+      </a>`).join('') : `<p class="sb-flyout-empty">${kind === 'pinned'
+      ? 'هنوز پرامپتی پین نکرده‌اید. در منوی باز، روی آیکون سنجاق کنار هر پرامپت بزنید.'
+      : 'هنوز پرامپتی نساخته‌اید.'}</p>`}`;
+  document.body.appendChild(menu);
+  // Place it beside the button, toward the page content (left of the rail in RTL), clamped inside the viewport.
+  const r = btn.getBoundingClientRect();
+  const rail = btn.closest('.sidebar').getBoundingClientRect();
+  const m = menu.getBoundingClientRect();
+  const gap = 8;
+  const toLeft = r.left + r.width / 2 > innerWidth / 2;
+  let x = toLeft ? rail.left - gap - m.width : rail.right + gap;
+  let y = r.top - 6;
+  x = Math.min(Math.max(8, x), innerWidth - m.width - 8);
+  y = Math.min(Math.max(8, y), innerHeight - m.height - 8);
+  menu.style.left = `${Math.round(x)}px`;
+  menu.style.top = `${Math.round(y)}px`;
+  btn.setAttribute('aria-expanded', 'true');
+  const outside = (e) => { if (!menu.contains(e.target) && !btn.contains(e.target)) closeFlyout(); };
+  const onKey = (e) => { if (e.key === 'Escape') { closeFlyout(); btn.focus(); } };
+  const onResize = () => closeFlyout();
+  document.addEventListener('mousedown', outside);
+  document.addEventListener('keydown', onKey);
+  addEventListener('resize', onResize);
+  addEventListener('hashchange', onResize);
+  menu.addEventListener('click', (e) => { if (e.target.closest('a')) closeFlyout(); });
+  flyout = {
+    kind,
+    cleanup() {
+      menu.remove();
+      btn.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('mousedown', outside);
+      document.removeEventListener('keydown', onKey);
+      removeEventListener('resize', onResize);
+      removeEventListener('hashchange', onResize);
+    },
+  };
 }
 
 let recentToken = 0;
@@ -239,7 +346,8 @@ let recentToken = 0;
 async function fillRecent(user) {
   // The sidebar can re-render while the list loads; only the latest call may write, into the live element.
   const token = ++recentToken;
-  const rows = (await prompts.listForUser(user.id)).slice(0, 40);
+  const all = await prompts.listForUser(user.id);
+  const rows = all.filter((r, i) => i < 40 || r.pinned);
   const box = $('#sb-recent');
   if (token !== recentToken || !box || auth.currentUser()?.id !== user.id) return;
   if (!rows.length) {
@@ -248,20 +356,18 @@ async function fillRecent(user) {
   }
   const { path, params } = parseHash();
   const currentId = path === '/studio' ? params.get('p') || studio.result?.id : null;
+  const pinned = prompts.pinnedOf(rows);
   const groups = new Map();
-  for (const r of rows) {
+  for (const r of rows.filter((x) => !x.pinned)) {
     const label = groupLabel(r.createdAt);
     if (!groups.has(label)) groups.set(label, []);
     groups.get(label).push(r);
   }
-  box.innerHTML = [...groups.entries()].map(([label, items]) => `
-    <div class="sb-group">
+  const sections = pinned.length ? [['پین‌شده‌ها', pinned], ...groups.entries()] : [...groups.entries()];
+  box.innerHTML = sections.map(([label, items], i) => `
+    <div class="sb-group ${pinned.length && i === 0 ? 'sb-pinned' : ''}">
       <h3>${esc(label)}</h3>
-      ${items.map((r) => `
-        <a class="sb-link ${r.id === currentId ? 'active' : ''}" href="#/studio?p=${encodeURIComponent(r.id)}" title="${esc(r.title || r.source)}">
-          <span dir="auto">${esc(truncate(r.title || r.source, 42))}</span>
-          ${r.archived ? icon('archive', 'sb-flag') : ''}
-        </a>`).join('')}
+      ${items.map((r) => sbLink(r, currentId)).join('')}
     </div>`).join('');
 }
 
@@ -819,6 +925,7 @@ function showThread(record, animate = false) {
         <div class="msg-actions">
           <button class="icon-btn copy-btn" id="copy-result" aria-label="کپی" title="کپی">${icon('copy')}</button>
           <button class="icon-btn ${record.archived ? 'on' : ''}" id="archive-btn" aria-label="${record.archived ? 'در آرشیو' : 'ذخیره در آرشیو'}" title="${record.archived ? 'در آرشیو (ویرایش)' : 'ذخیره در آرشیو'}">${icon('archive')}</button>
+          <button class="icon-btn ${record.pinned ? 'on' : ''}" id="pin-btn" aria-label="${record.pinned ? 'برداشتن پین' : 'پین کردن در منو'}" title="${record.pinned ? 'برداشتن پین' : 'پین کردن در منو'}">${icon('pin')}</button>
           <button class="icon-btn" id="refine-btn" aria-label="بهبود دوباره" title="بهبود دوباره">${icon('refresh')}</button>
           ${voice.canSpeak() ? `<button class="icon-btn" id="speak-btn" aria-label="خواندن با صدا" title="خواندن با صدا">${icon('volume')}</button>` : ''}
         </div>
@@ -843,6 +950,7 @@ function showThread(record, animate = false) {
       renderSidebar();
     }
   });
+  $('#pin-btn').addEventListener('click', () => togglePin(record.id));
   $('#speak-btn')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     if (btn.classList.contains('on')) { voice.stopSpeaking(); return; }
@@ -1529,6 +1637,7 @@ function renderHelp() {
     ['sliders', 'گزینه‌های ساخت', '«نوع پرامپت» را روی «تشخیص خودکار» بگذارید تا نوع مناسب (برنامه‌نویسی، تصویر، ویدیو، نویسندگی، تحقیق، بازاریابی، ایجنت یا عمومی) خودکار انتخاب شود، یا خودتان انتخاب کنید. «زبان خروجی» و «میزان جزئیات» (خلاصه، متعادل، جامع) را هم کنار کادر نوشتن تعیین کنید.'],
     ['copy', 'استفاده از نتیجه', 'نتیجه با زبانه‌های فارسی و انگلیسی نمایش داده می‌شود. با دکمه کپی آن را بردارید، با دکمه آرشیو ذخیره‌اش کنید و با «بهبود دوباره» نتیجه را به ورودی جدید تبدیل کنید تا باز هم بهترش کنید. زیر هر نتیجه «چه چیزهایی بهتر شد؟» تغییرات را توضیح می‌دهد.'],
     ['history', 'تاریخچه و جستجو', 'هر پرامپتی که می‌سازید خودکار ذخیره می‌شود و در منوی کناری (امروز، دیروز، ۷ روز گذشته و…) دیده می‌شود. در «جستجوی پرامپت‌ها» همه را بر اساس متن و نوع پیدا کنید. جستجو «ي/ی» و «ك/ک» و اعداد فارسی و انگلیسی را یکسان در نظر می‌گیرد.'],
+    ['pin', 'پین کردن پرامپت‌ها', 'پرامپت‌های پرکاربرد را با آیکون سنجاق (کنار هر پرامپت در منوی کناری یا زیر نتیجه) پین کنید تا همیشه در بخش «پین‌شده‌ها» بالای منو بمانند. وقتی منو بسته است، دو دکمه «پین‌شده‌ها» و «اخیر» (۱۰ پرامپت آخر) فهرست را کنار منو باز می‌کنند.'],
     ['archive', 'آرشیو پیشرفته', 'پرامپت‌های مهم را با عنوان، پوشه، برچسب، یادداشت و علاقه‌مندی در آرشیو نگه دارید. در آرشیو بر اساس کلمه، پوشه، برچسب، نوع، زبان، بازه زمانی و علاقه‌مندی فیلتر و مرتب کنید، و متن پرامپت‌ها را ویرایش کنید.'],
     ['user', 'حساب کاربری و ورود', 'با گوگل یا با ایمیل و رمز وارد شوید. با «مرا به خاطر بسپار» بعد از بستن مرورگر هم وارد می‌مانید. بعد از ثبت‌نام یک کد بازیابی می‌گیرید؛ اگر رمز را فراموش کردید با «فراموشی رمز» و همین کد رمز جدید بگذارید. آواتار، نام، ایمیل و رمز را در «حساب کاربری» تغییر دهید.'],
     ['sun', 'تم روشن و تیره', 'با دکمه خورشید/ماه بالای صفحه یا از منوی حساب، تم را عوض کنید. در «تنظیمات» می‌توانید «مطابق سیستم» را هم انتخاب کنید.'],
@@ -1632,7 +1741,8 @@ function setupAndroidBack() {
 async function boot() {
   setupAndroidBack();
   // Rail labels: only when the desktop sidebar is collapsed to icons.
-  enableTooltips((el) => el.closest('.sidebar') && document.body.classList.contains('sidebar-closed') && !mobileQuery.matches);
+  enableTooltips((el) => el.closest('.sidebar') && document.body.classList.contains('sidebar-closed') && !mobileQuery.matches
+    && el.getAttribute('aria-expanded') !== 'true');
   try {
     await auth.restore();
   } catch (err) {

@@ -375,6 +375,46 @@ await page.click('.modal-foot button:has-text("ذخیره کردم")');
 await page.waitForSelector('#user-menu-btn');
 step('forgot password: wrong code rejected, right code resets and signs in');
 
+// Pinned prompts: pin from the sidebar, open pinned/recent flyouts from the rail, unpin from the thread
+await page.hover('#sb-recent .sb-row');
+await page.click('#sb-recent .sb-row .sb-pin');
+await page.waitForSelector('#sb-recent .sb-pinned .sb-link');
+assert.equal(await page.textContent('#sb-recent .sb-pinned h3'), 'پین‌شده‌ها');
+assert.equal(await page.locator('#sb-recent .sb-pinned .sb-link').count(), 1);
+const pinnedTitle = (await page.textContent('#sb-recent .sb-pinned .sb-link span')).trim();
+assert.ok(!(await page.isVisible('[data-flyout="recent"]')), 'rail-only buttons hidden while the sidebar is open');
+await page.click('.sb-toggle');
+await page.waitForTimeout(300);
+await page.click('[data-flyout="recent"]');
+await page.waitForSelector('.sb-flyout a');
+const fly = await page.evaluate(() => {
+  const r = document.querySelector('.sb-flyout').getBoundingClientRect();
+  const s = document.querySelector('.sidebar').getBoundingClientRect();
+  return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: innerWidth, h: innerHeight, sbLeft: s.left, n: document.querySelectorAll('.sb-flyout a').length, over: document.documentElement.scrollWidth - innerWidth };
+});
+assert.ok(fly.n >= 1 && fly.n <= 10, `recent flyout lists at most 10: ${fly.n}`);
+assert.ok(fly.l >= 0 && fly.t >= 0 && fly.r <= fly.w && fly.b <= fly.h, `flyout on screen: ${JSON.stringify(fly)}`);
+assert.ok(fly.r <= fly.sbLeft, `flyout opens beside the rail, toward the content: ${JSON.stringify(fly)}`);
+assert.ok(fly.over <= 0, 'flyout adds no horizontal scroll');
+await page.click('[data-flyout="recent"]');
+await page.waitForSelector('.sb-flyout', { state: 'detached' });
+await page.click('[data-flyout="pinned"]');
+await page.waitForSelector('.sb-flyout a');
+assert.equal(await page.locator('.sb-flyout a').count(), 1);
+await page.keyboard.press('Escape');
+await page.waitForSelector('.sb-flyout', { state: 'detached' });
+await page.click('[data-flyout="pinned"]');
+await page.click('.sb-flyout a');
+await page.waitForSelector('.sb-flyout', { state: 'detached' });
+await page.waitForSelector('#pin-btn.on');
+assert.equal((await page.textContent('.result-title')).trim().slice(0, 10), pinnedTitle.slice(0, 10));
+await page.click('.sb-toggle');
+await page.waitForTimeout(300);
+await page.click('#pin-btn');
+await page.waitForSelector('#pin-btn:not(.on)');
+await page.waitForSelector('#sb-recent .sb-pinned', { state: 'detached' });
+step('pin prompts; rail pinned/recent flyouts open beside the rail');
+
 // Regression: hovering the avatar in the collapsed rail must not make the page scroll (it used to flicker)
 await page.click('.sb-toggle');
 await page.waitForTimeout(300);

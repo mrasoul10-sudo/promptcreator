@@ -1,7 +1,7 @@
 // Prompt records: history (every generation) and archive (records the user chose to keep).
 
-import * as db from './db.js?v=202609251236';
-import { formatPrompt } from './prompt-spec.js?v=202609251236';
+import * as db from './db.js?v=202609251243';
+import { formatPrompt } from './prompt-spec.js?v=202609251243';
 
 const EDITABLE = ['title', 'promptEn', 'promptFa', 'notes', 'category', 'tags', 'favorite'];
 
@@ -71,6 +71,17 @@ export async function archive(userId, id, meta = {}) {
 export async function unarchive(userId, id) {
   const row = await owned(userId, id);
   return db.put('prompts', { ...row, archived: false, archivedAt: null, updatedAt: Date.now() });
+}
+
+/** Pins a prompt to the top of the sidebar (like pinned chats) or unpins it. */
+export async function setPinned(userId, id, pinned) {
+  const row = await owned(userId, id);
+  return db.put('prompts', { ...row, pinned: Boolean(pinned), pinnedAt: pinned ? Date.now() : null });
+}
+
+/** Pinned prompts, most recently pinned first. */
+export function pinnedOf(rows) {
+  return rows.filter((r) => r.pinned).sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
 }
 
 export async function remove(userId, id) {
@@ -202,6 +213,8 @@ export async function importData(userId, payload) {
       favorite: Boolean(p.favorite),
       archived: Boolean(p.archived),
       archivedAt: p.archivedAt || null,
+      pinned: Boolean(p.pinned),
+      pinnedAt: p.pinned ? Number(p.pinnedAt) || Date.now() : null,
       createdAt: Number(p.createdAt) || Date.now(),
       updatedAt: Number(p.updatedAt) || Date.now(),
     }));
